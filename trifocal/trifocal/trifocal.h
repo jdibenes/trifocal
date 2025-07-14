@@ -14,23 +14,23 @@
 //-----------------------------------------------------------------------------
 template <typename T>
 void
-compute_A
+build_A
 (
-    T const* p1,
-    T const* p2,
-    T const* p3,
+    T const* points_1,
+    T const* points_2,
+    T const* points_3,
     int count,
     T* A // shape (4*n, 27) as RowMajor
 )
 {
     for (int i = 0; i < count; ++i)
     {
-        T x1 = p1[i * 2 + 0];
-        T y1 = p1[i * 2 + 1];
-        T x2 = p2[i * 2 + 0];
-        T y2 = p2[i * 2 + 1];
-        T x3 = p3[i * 2 + 0];
-        T y3 = p3[i * 2 + 1];
+        T x1 = points_1[i * 2 + 0];
+        T y1 = points_1[i * 2 + 1];
+        T x2 = points_2[i * 2 + 0];
+        T y2 = points_2[i * 2 + 1];
+        T x3 = points_3[i * 2 + 0];
+        T y3 = points_3[i * 2 + 1];
 
         A[(4 * i + 0) * 27 + 0] = x1;
         A[(4 * i + 0) * 27 + 1] = 0;
@@ -200,3 +200,57 @@ linear_TFT
     Eigen::Map<Eigen::Matrix<T, 27, 1>> result(TFT);
     result = Up * ((A_m * Up).bdcSvd(Eigen::ComputeFullV).matrixV())(Eigen::all, Eigen::last);
 }
+
+//-----------------------------------------------------------------------------
+// OK
+//-----------------------------------------------------------------------------
+template <typename T>
+void
+TFT_from_P
+(
+    T const* projection_1,
+    T const* projection_2,
+    T const* projection_3,
+    T* TFT
+)
+{
+    Eigen::Map<const Eigen::Matrix<T, 3, 4>> P1(projection_1);
+    Eigen::Map<const Eigen::Matrix<T, 3, 4>> P2(projection_2);
+    Eigen::Map<const Eigen::Matrix<T, 3, 4>> P3(projection_3);
+
+    Eigen::Matrix<T, 2, 4> P1i;
+    Eigen::Matrix<T, 1, 4> P2j;
+    Eigen::Matrix<T, 1, 4> P3k;
+    Eigen::Matrix<T, 4, 4> D;
+
+    T norm = 0;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        switch (i)
+        {
+        case 0: P1i = P1(Eigen::seqN(1, 2), Eigen::all); break;
+        case 1: P1i = P1(Eigen::seqN(0, 2, 2), Eigen::all); break;
+        case 2: P1i = P1(Eigen::seqN(0, 2), Eigen::all); break;
+        }
+        for (int k = 0; k < 3; ++k)
+        {
+            P3k = P3(k, Eigen::all);
+            for (int j = 0; j < 3; ++j)
+            {
+                P2j = P2(j, Eigen::all);
+                D << P1i, P2j, P3k;
+                T t = (1 - (2 * (i & 1))) * D.determinant();
+                norm += t * t;
+                TFT[i * 9 + k * 3 + j] = t;
+            }
+        }
+    }
+
+    norm = sqrt(norm);
+    for (int i = 0; i < 27; ++i) { TFT[i] /= norm; }
+}
+
+//-----------------------------------------------------------------------------
+// OK
+//-----------------------------------------------------------------------------
