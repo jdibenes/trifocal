@@ -11,6 +11,35 @@
 #include <Eigen/Geometry>
 #include <unsupported/Eigen/src/KroneckerProduct/KroneckerTensorProduct.h>
 
+
+///////////////////////////////////////////////////////////////////////////////
+// Helper methods
+///////////////////////////////////////////////////////////////////////////////
+
+//-----------------------------------------------------------------------------
+// OK
+//-----------------------------------------------------------------------------
+template <typename T>
+void
+cross_matrix
+(
+    T const* v,
+    T* M
+)
+{
+    Eigen::Map<Eigen::Matrix<T, 3, 3>> M_m(M);
+    M_m <<     0,  (-v[2]),   v[1], 
+             v[2],     0,   (-v[0]),
+           (-v[1]),  v[0],      0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// A methods
+///////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
+using MatrixA = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor>;
+
 //-----------------------------------------------------------------------------
 // OK
 //-----------------------------------------------------------------------------
@@ -20,7 +49,7 @@ build_A
 (
     T const* points_2D,
     int count,
-    T* A // shape (4*n, 27) as RowMajor
+    T* A
 )
 {
     for (int i = 0; i < count; ++i)
@@ -151,6 +180,28 @@ build_A
 //-----------------------------------------------------------------------------
 template <typename T>
 void
+fixed_cost_from_A
+(
+    T const* A,
+    int rows,
+    T* cost
+)
+{
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> R = Eigen::Map<const MatrixA<T>>(A, rows, 27).householderQr().matrixQR().topRows(27).triangularView<Eigen::Upper>();
+    Eigen::Map<Eigen::Matrix<T, 27, 27>> cost_m(cost);
+    cost_m = R.transpose() * R;
+}
+
+
+
+
+
+
+//-----------------------------------------------------------------------------
+// OK
+//-----------------------------------------------------------------------------
+template <typename T>
+void
 linear_TFT
 (
     T const* A,
@@ -158,7 +209,7 @@ linear_TFT
     T* TFT
 )
 {
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor>> A_m(A, rows, 27);
+    Eigen::Map<const MatrixA<T>> A_m(A, rows, 27);
 
     Eigen::Matrix<T, 27, 1> t = (A_m.bdcSvd(Eigen::ComputeFullV).matrixV())(Eigen::all, Eigen::last);
 
@@ -200,6 +251,13 @@ linear_TFT
     Eigen::Map<Eigen::Matrix<T, 27, 1>> result(TFT);
     result = Up * ((A_m * Up).bdcSvd(Eigen::ComputeFullV).matrixV())(Eigen::all, Eigen::last);
 }
+
+
+
+
+
+
+
 
 //-----------------------------------------------------------------------------
 // OK
@@ -249,23 +307,6 @@ TFT_from_P
 
     norm = sqrt(norm);
     for (int i = 0; i < 27; ++i) { TFT[i] /= norm; }
-}
-
-//-----------------------------------------------------------------------------
-// OK
-//-----------------------------------------------------------------------------
-template <typename T>
-void
-crossM
-(
-    T const* v,
-    T* M
-)
-{
-    Eigen::Map<Eigen::Matrix<T, 3, 3>> M_m(M);
-    M_m <<     0,  (-v[2]),   v[1], 
-             v[2],     0,   (-v[0]),
-           (-v[1]),  v[0],      0;
 }
 
 //-----------------------------------------------------------------------------
@@ -413,10 +454,10 @@ R_t_from_TFT
     if (epi21(Eigen::last, Eigen::last) < 0) { epi21 = -epi21; }
 
     Eigen::Matrix<T, 3, 3> epi21_x;
-    crossM(epi21.data(), epi21_x.data());
+    cross_matrix(epi21.data(), epi21_x.data());
 
     Eigen::Matrix<T, 3, 3> epi31_x;
-    crossM(epi31.data(), epi31_x.data());
+    cross_matrix(epi31.data(), epi31_x.data());
 
     Eigen::Matrix<T, 3, 3> E21;
     E21 << (epi21_x * (T1 * epi31)), (epi21_x * (T2 * epi31)), (epi21_x * (T3 * epi31));
@@ -472,22 +513,3 @@ R_t_from_TFT
     c2.col(3) = (numerator / denominator) * c2.col(3);
 }
 
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-template <typename T>
-void
-compute_fixed_cost_A
-(
-    T const* A,
-    int rows,
-    T* R1tR1
-)
-{
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor>> A_m(A, rows, 27);
-    Eigen::HouseholderQR<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor>> qr = A_m.householderQr();
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> R0 = qr.matrixQR().triangularView<Eigen::Upper>();
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> R = R0(Eigen::seq(0, 26), Eigen::seq(0, 26));
-    Eigen::Map<Eigen::Matrix<T, 27, 27>> R1tR1_m(R1tR1);
-    R1tR1_m = R.transpose() * R;  
-}
