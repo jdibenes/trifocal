@@ -33,6 +33,8 @@ cross_matrix
            (-v[1]),  v[0],      0;
 }
 
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // A methods
 ///////////////////////////////////////////////////////////////////////////////
@@ -192,10 +194,43 @@ fixed_cost_from_A
     cost_m = R.transpose() * R;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// E methods
+///////////////////////////////////////////////////////////////////////////////
 
+///////////////////////////////////////////////////////////////////////////////
+// TFT methods
+///////////////////////////////////////////////////////////////////////////////
 
+//-----------------------------------------------------------------------------
+// OK
+//-----------------------------------------------------------------------------
+template <typename T>
+void
+epipoles_from_TFT
+(
+    T const* TFT,
+    T* e
+)
+{
+    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t1 = Eigen::Map<const Eigen::Matrix<T, 3, 3>>(TFT +  0).jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
+    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t2 = Eigen::Map<const Eigen::Matrix<T, 3, 3>>(TFT +  9).jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
+    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t3 = Eigen::Map<const Eigen::Matrix<T, 3, 3>>(TFT + 18).jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
 
+    Eigen::Matrix<T, 3, 3> vx;
+    vx << ( svd_t1.matrixV().col(2)),
+          ( svd_t2.matrixV().col(2)),
+          ( svd_t3.matrixV().col(2));
 
+    Eigen::Matrix<T, 3, 3> ux;
+    ux << (-svd_t1.matrixU().col(2)),
+          (-svd_t2.matrixU().col(2)),
+          (-svd_t3.matrixU().col(2));
+
+    Eigen::Map<Eigen::Matrix<T, 3, 2>> e_m(e);
+    e_m << (-ux.jacobiSvd(Eigen::ComputeFullU).matrixU().col(2)),
+           (-vx.jacobiSvd(Eigen::ComputeFullU).matrixU().col(2));
+}
 
 //-----------------------------------------------------------------------------
 // OK
@@ -206,52 +241,28 @@ linear_TFT
 (
     T const* A,
     int rows,
-    T* TFT
+    T* TFT,
+    T threshold = 0
 )
 {
     Eigen::Map<const MatrixA<T>> A_m(A, rows, 27);
+    Eigen::Matrix<T, 27, 1> t = A_m.bdcSvd(Eigen::ComputeFullV).matrixV().col(26);
 
-    Eigen::Matrix<T, 27, 1> t = (A_m.bdcSvd(Eigen::ComputeFullV).matrixV())(Eigen::all, Eigen::last);
-
-    Eigen::Map<Eigen::Matrix<T, 3, 3>> T1(t.data() + 0);
-    Eigen::Map<Eigen::Matrix<T, 3, 3>> T2(t.data() + 9);
-    Eigen::Map<Eigen::Matrix<T, 3, 3>> T3(t.data() + 18);
-
-    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t1 = T1.jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
-    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t2 = T2.jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
-    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t3 = T3.jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
-
-    Eigen::Matrix<T, 3, 1> v1 = (svd_t1.matrixV())(Eigen::all, Eigen::last);
-    Eigen::Matrix<T, 3, 1> v2 = (svd_t2.matrixV())(Eigen::all, Eigen::last);
-    Eigen::Matrix<T, 3, 1> v3 = (svd_t3.matrixV())(Eigen::all, Eigen::last);
-
-    Eigen::Matrix<T, 3, 3> vx;
-    vx << v1, v2, v3;
-    Eigen::Matrix<T, 3, 1> epi31 = -((vx.jacobiSvd(Eigen::ComputeFullU).matrixU())(Eigen::all, Eigen::last));
-
-    Eigen::Matrix<T, 3, 1> u1 = -((svd_t1.matrixU())(Eigen::all, Eigen::last));
-    Eigen::Matrix<T, 3, 1> u2 = -((svd_t2.matrixU())(Eigen::all, Eigen::last));
-    Eigen::Matrix<T, 3, 1> u3 = -((svd_t3.matrixU())(Eigen::all, Eigen::last));
-
-    Eigen::Matrix<T, 3, 3> ux;
-    ux << u1, u2, u3;
-    Eigen::Matrix<T, 3, 1> epi21 = -((ux.jacobiSvd(Eigen::ComputeFullU).matrixU())(Eigen::all, Eigen::last));
+    Eigen::Matrix<T, 3, 2> e;
+    epipoles_from_TFT(t.data(), e.data());
 
     Eigen::Matrix<T, 3, 3> I3 = Eigen::Matrix<T, 3, 3>::Identity();
     Eigen::Matrix<T, 9, 9> I9 = Eigen::Matrix<T, 9, 9>::Identity();
-
     Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> E(27, 18);
-    E << Eigen::kroneckerProduct(I3, Eigen::kroneckerProduct(epi31, I3)), Eigen::kroneckerProduct(I9, -epi21);
+    E << Eigen::kroneckerProduct(I3, Eigen::kroneckerProduct(e.col(1), I3)), Eigen::kroneckerProduct(I9, -e.col(0));
 
-    Eigen::BDCSVD<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> E_svd = E.bdcSvd(Eigen::ComputeFullU);
-    Eigen::Index E_rank = E_svd.rank();
-    int64_t E_last = E_rank - 1;
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> Up = (E_svd.matrixU())(Eigen::all, Eigen::seq(0, E_last));
+    Eigen::BDCSVD<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> svd_E = E.bdcSvd(Eigen::ComputeFullU);
+    if (threshold > 0) { svd_E.setThreshold(threshold); }
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> Up = svd_E.matrixU()(Eigen::all, Eigen::seq(0, svd_E.rank() - 1));
 
     Eigen::Map<Eigen::Matrix<T, 27, 1>> result(TFT);
-    result = Up * ((A_m * Up).bdcSvd(Eigen::ComputeFullV).matrixV())(Eigen::all, Eigen::last);
+    result = Up * ((A_m * Up).bdcSvd(Eigen::ComputeFullV).matrixV()(Eigen::all, Eigen::last));
 }
-
 
 
 
