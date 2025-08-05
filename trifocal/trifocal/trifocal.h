@@ -11,7 +11,6 @@
 #include <Eigen/Geometry>
 #include <unsupported/Eigen/src/KroneckerProduct/KroneckerTensorProduct.h>
 
-
 ///////////////////////////////////////////////////////////////////////////////
 // Helper methods
 ///////////////////////////////////////////////////////////////////////////////
@@ -28,12 +27,10 @@ cross_matrix
 )
 {
     Eigen::Map<Eigen::Matrix<T, 3, 3>> M_m(M);
-    M_m <<     0,  (-v[2]),   v[1], 
-             v[2],     0,   (-v[0]),
-           (-v[1]),  v[0],      0;
+    M_m <<     0,   (-v[2]), ( v[1]),
+           ( v[2]),     0,   (-v[0]),
+           (-v[1]), ( v[0]),      0;
 }
-
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // A methods
@@ -180,6 +177,15 @@ build_A
 //-----------------------------------------------------------------------------
 // OK
 //-----------------------------------------------------------------------------
+/*
+Based on algorithm described in:
+Persson, P., Astrom, K. (2019). 
+Global Trifocal Adjustment. 
+In: Felsberg, M., Forssen, PE., Sintorn, IM., Unger, J. (eds) Image Analysis.
+SCIA 2019.
+Lecture Notes in Computer Science(), vol 11482. Springer, Cham. 
+https://doi.org/10.1007/978-3-030-20205-7_2
+*/
 template <typename T>
 void
 fixed_cost_from_A
@@ -197,6 +203,155 @@ fixed_cost_from_A
 ///////////////////////////////////////////////////////////////////////////////
 // E methods
 ///////////////////////////////////////////////////////////////////////////////
+
+//-----------------------------------------------------------------------------
+// OK
+//-----------------------------------------------------------------------------
+template <typename T>
+void
+triangulate
+(
+    T const* cameras,
+    int count_cameras,
+    T const* points_2D,
+    int count_points,
+    T* points_H3D
+)
+{
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> P_m(     cameras,                 3, 4 * count_cameras);
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> p2D_m( points_2D, 2 * count_cameras, count_points);
+    Eigen::Map<      Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> h3D_m(points_H3D,                 4, count_points);
+
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> ls_matrix(2 * count_cameras, 4);
+    Eigen::Matrix<T, 2, 3> L{
+        {0, -1, 0.0},
+        {1,  0, 0.0},
+    };
+
+    for (int n = 0; n < count_points; ++n)
+    {
+        for (int i = 0; i < count_cameras; ++i)
+        {
+            L(0, 2) =  p2D_m((i * 2) + 1, n);
+            L(1, 2) = -p2D_m((i * 2) + 0, n);
+            ls_matrix(Eigen::seq((i * 2) + 0, (i * 2) + 1), Eigen::all) = L * P_m(Eigen::all, Eigen::seq((i * 4) + 0, (i * 4) + 3));
+        }
+        h3D_m.col(n) = ls_matrix.bdcSvd(Eigen::ComputeFullV).matrixV().col(3);
+    }
+}
+
+//-----------------------------------------------------------------------------
+// OK
+//-----------------------------------------------------------------------------
+template <typename T>
+void
+R_t_from_E
+(
+    T const* E,
+    T const* points_2D,
+    int count_points,
+    T* P//,
+    //T* points_3D // TODO
+)
+{
+    Eigen::Matrix<T, 3, 3> W{
+        {0, -1, 0},
+        {1,  0, 0},
+        {0,  0, 1},
+    };
+
+    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> E_svd = Eigen::Map<const Eigen::Matrix<T, 3, 3>>(E).jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
+    Eigen::Matrix<T, 3, 3> U  = E_svd.matrixU();
+    Eigen::Matrix<T, 3, 3> Vt = E_svd.matrixV().transpose();
+
+    Eigen::Matrix<T, 3, 3> R1 = U * W             * Vt;
+    Eigen::Matrix<T, 3, 3> R2 = U * W.transpose() * Vt;
+    if (R1.determinant() < 0) { R1 = -R1; }
+    if (R2.determinant() < 0) { R2 = -R2; }
+
+    Eigen::Matrix<T, 3, 1> pt = U.col(2);
+    Eigen::Matrix<T, 3, 1> nt = -pt;
+
+    Eigen::Matrix<T, 3, 4> P0 = Eigen::Matrix<T, 3, 4>::Identity();
+    Eigen::Matrix<T, 3, 4 * 2 * 4> cameras;
+    cameras << P0, R1, pt, P0, R1, nt, P0, R2, pt, P0, R2, nt;
+
+
+
+
+
+    std::shared_ptr<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> XYZW_1 = std::make_shared<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>>(4, count_points);
+    std::shared_ptr<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> XYZW_x;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    int64_t max_count = 0;
+    int64_t select = 0;
+
+
+
+
+
+
+
+
+    for (int i = 0; i < 4; ++i)
+    {
+        triangulate(cameras.data() + (i * 3 * 4 * 2), 2, points_2D, count_points, XYZW_1.get()->data());
+
+
+
+
+        int64_t count = (XYZW_1.get()->colwise().hnormalized().row(2).array() > 0).count() + ((cameras(Eigen::all, Eigen::seq((i * 8) + 4, (i * 8) + 7)) * *XYZW_1).row(2).array() > 0).count();
+
+
+        if (count < max_count) { continue; }
+        max_count = count;
+        select = i;
+    }
+
+
+    Eigen::Map<Eigen::Matrix<T, 3, 4>> P_m(P);
+    P_m = cameras(Eigen::all, Eigen::seq((select * 8) + 4, (select * 8) + 7));
+}
+
+
+
+
+
+
+
+
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // TFT methods
@@ -270,6 +425,9 @@ linear_TFT
 
 
 
+
+
+
 //-----------------------------------------------------------------------------
 // OK
 //-----------------------------------------------------------------------------
@@ -320,107 +478,8 @@ TFT_from_P
     for (int i = 0; i < 27; ++i) { TFT[i] /= norm; }
 }
 
-//-----------------------------------------------------------------------------
-// OK
-//-----------------------------------------------------------------------------
-template <typename T>
-void
-triangulate
-(
-    T const* cameras,
-    int count_cameras,
-    T const* points_2D,
-    int count_points,
-    T* points_3D
-)
-{
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> P_m(cameras, 3, 4 * count_cameras);
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> p2D_m(points_2D, 2 * count_cameras, count_points);
-    Eigen::Map<      Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> p3D_m(points_3D, 4, count_points);
 
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> ls_matrix(2 * count_cameras, 4);
-    Eigen::Matrix<T, 2, 3> L{
-        {0, -1, 0.0},
-        {1,  0, 0.0},
-    };
 
-    for (int n = 0; n < count_points; ++n)
-    {
-        for (int i = 0; i < count_cameras; ++i)
-        {
-            L(0, 2) =  p2D_m((i * 2) + 1, n);
-            L(1, 2) = -p2D_m((i * 2) + 0, n);
-            ls_matrix(Eigen::seq((i * 2) + 0, (i * 2) + 1), Eigen::all) = L * P_m(Eigen::all, Eigen::seq((i * 4) + 0, (i * 4) + 3));
-        }
-        p3D_m.col(n) = ls_matrix.bdcSvd(Eigen::ComputeFullV).matrixV().col(3);
-    }
-}
-
-//-----------------------------------------------------------------------------
-// OK
-//-----------------------------------------------------------------------------
-template <typename T>
-void
-R_t_from_E
-(
-    T const* E,
-    T const* points2D,
-    int count_points,
-    T* P
-)
-{
-    Eigen::Matrix<T, 3, 3> W{
-        {0, -1, 0},
-        {1,  0, 0},
-        {0,  0, 1},
-    };
-
-    Eigen::Matrix<T, 3, 3> Wt{
-        { 0, 1, 0},
-        {-1, 0, 0},
-        { 0, 0, 1},
-    };
-
-    Eigen::Map<const Eigen::Matrix<T, 3, 3>> E_m(E);
-
-    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> E_svd = E_m.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
-    Eigen::Matrix<T, 3, 3> U  = E_svd.matrixU();
-    Eigen::Matrix<T, 3, 3> Vt = E_svd.matrixV().transpose();
-
-    Eigen::Matrix<T, 3, 3> R1 = U * W  * Vt;
-    Eigen::Matrix<T, 3, 3> R2 = U * Wt * Vt;
-    if (R1.determinant() < 0) { R1 = -R1; }
-    if (R2.determinant() < 0) { R2 = -R2; }
-
-    Eigen::Matrix<T, 3, 1> t  = U.col(2);
-    Eigen::Matrix<T, 3, 1> nt = -t;
-
-    Eigen::Matrix<T, 3, 4> P0 = Eigen::Matrix<T, 3, 4>::Identity();
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> cameras(3, 4 * 4 * 2);
-    cameras << P0, R1, t, P0, R1, nt, P0, R2, t, P0, R2, nt;
-
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> XYZW1(4, count_points);
-    //Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> XYZW2(4, count_points);
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> XYZ1(3, count_points);
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> XYZ2(3, count_points);
-    
-    int64_t max_count = 0;
-    int64_t select = 3;
-
-    for (int i = 0; i < 4; ++i)
-    {
-        triangulate(cameras.data() + (i * 3 * 4 * 2), 2, points2D, count_points, XYZW1.data());
-        XYZ2 = cameras(Eigen::all, Eigen::seq((i * 8) + 4, (i * 8) + 7)) * XYZW1;
-        XYZ1 = XYZW1.colwise().hnormalized();
-        int64_t count = (XYZ1(2, Eigen::all).array() >= 0).count() + (XYZ2(2, Eigen::all).array() >= 0).count();
-        if (count < max_count) { continue; }
-        max_count = count;
-        select = i;
-    }
-
-    Eigen::Map<Eigen::Matrix<T, 3, 4>> P_m(P);
-    P_m = cameras(Eigen::all, Eigen::seq((select * 8) + 4, (select * 8) + 7));
-}
 
 //-----------------------------------------------------------------------------
 // OK
@@ -430,62 +489,65 @@ void
 R_t_from_TFT
 (
     T const* TFT,
-    T const* points2D,
+    T const* points_2D,
     int count_points,
     T* Rt01,
     T* Rt02
 )
 {
+    Eigen::Matrix<T, 3, 2> e;
+    epipoles_from_TFT(TFT, e.data());
+
+    if (e(2, 0) < 0) { e.col(0) = -e.col(0); }
+    if (e(2, 1) < 0) { e.col(1) = -e.col(1); }
+
+    Eigen::Matrix<T, 3, 3> epi21_x;
+    Eigen::Matrix<T, 3, 3> epi31_x;
+    cross_matrix(e.data() + 0, epi21_x.data());
+    cross_matrix(e.data() + 3, epi31_x.data());
+
     Eigen::Map<const Eigen::Matrix<T, 3, 3>> T1(TFT + 0);
     Eigen::Map<const Eigen::Matrix<T, 3, 3>> T2(TFT + 9);
     Eigen::Map<const Eigen::Matrix<T, 3, 3>> T3(TFT + 18);
 
-    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t1 = T1.jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
-    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t2 = T2.jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
-    Eigen::JacobiSVD<Eigen::Matrix<T, 3, 3>> svd_t3 = T3.jacobiSvd(Eigen::ComputeFullV | Eigen::ComputeFullU);
-
-    Eigen::Matrix<T, 3, 1> v1 = (svd_t1.matrixV())(Eigen::all, Eigen::last);
-    Eigen::Matrix<T, 3, 1> v2 = (svd_t2.matrixV())(Eigen::all, Eigen::last);
-    Eigen::Matrix<T, 3, 1> v3 = (svd_t3.matrixV())(Eigen::all, Eigen::last);
-
-    Eigen::Matrix<T, 3, 3> vx;
-    vx << v1, v2, v3;
-    Eigen::Matrix<T, 3, 1> epi31 = -((vx.jacobiSvd(Eigen::ComputeFullU).matrixU())(Eigen::all, Eigen::last));
-
-    if (epi31(Eigen::last, Eigen::last) < 0) { epi31 = -epi31; }
-
-    Eigen::Matrix<T, 3, 1> u1 = -((svd_t1.matrixU())(Eigen::all, Eigen::last));
-    Eigen::Matrix<T, 3, 1> u2 = -((svd_t2.matrixU())(Eigen::all, Eigen::last));
-    Eigen::Matrix<T, 3, 1> u3 = -((svd_t3.matrixU())(Eigen::all, Eigen::last));
-
-    Eigen::Matrix<T, 3, 3> ux;
-    ux << u1, u2, u3;
-    Eigen::Matrix<T, 3, 1> epi21 = -((ux.jacobiSvd(Eigen::ComputeFullU).matrixU())(Eigen::all, Eigen::last));
-
-    if (epi21(Eigen::last, Eigen::last) < 0) { epi21 = -epi21; }
-
-    Eigen::Matrix<T, 3, 3> epi21_x;
-    cross_matrix(epi21.data(), epi21_x.data());
-
-    Eigen::Matrix<T, 3, 3> epi31_x;
-    cross_matrix(epi31.data(), epi31_x.data());
-
     Eigen::Matrix<T, 3, 3> E21;
-    E21 << (epi21_x * (T1 * epi31)), (epi21_x * (T2 * epi31)), (epi21_x * (T3 * epi31));
-
     Eigen::Matrix<T, 3, 3> E31;
-    E31 << (epi31_x * (T1.transpose() * epi21)), (epi31_x * (T2.transpose() * epi21)), (epi31_x * (T3.transpose() * epi21));
+
+
+
+
+
+
+    
+    
+
+    
+
+    E21 << (epi21_x * (T1             * e.col(1))), (epi21_x * (T2             * e.col(1))), (epi21_x * (T3             * e.col(1)));    
+    E31 << (epi31_x * (T1.transpose() * e.col(0))), (epi31_x * (T2.transpose() * e.col(0))), (epi31_x * (T3.transpose() * e.col(0)));
     E31 = -E31;
 
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> p2D(points2D, 6, count_points);
 
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> p21(4, count_points);
-    p21 << p2D(Eigen::seq(0, 1), Eigen::all), p2D(Eigen::seq(2, 3), Eigen::all);
+
+
+
+
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> p2D(points_2D, 6, count_points);
+
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> p21(4, count_points);    
     Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> p31(4, count_points);
+
+    p21 << p2D(Eigen::seq(0, 1), Eigen::all), p2D(Eigen::seq(2, 3), Eigen::all);
     p31 << p2D(Eigen::seq(0, 1), Eigen::all), p2D(Eigen::seq(4, 5), Eigen::all);
 
     R_t_from_E(E21.data(), p21.data(), count_points, Rt01);
     R_t_from_E(E31.data(), p31.data(), count_points, Rt02);
+
+
+
+
+
+
 
     Eigen::Matrix<T, 3, 4> c0 = Eigen::Matrix<T, 3, 4>::Identity();
     Eigen::Map<Eigen::Matrix<T, 3, 4>> c1(Rt01);
@@ -523,4 +585,5 @@ R_t_from_TFT
 
     c2.col(3) = (numerator / denominator) * c2.col(3);
 }
+
 
