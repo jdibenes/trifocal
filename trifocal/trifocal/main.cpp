@@ -34,9 +34,12 @@ struct TrifocalReprojectionError
 
 int main()
 {
-    Eigen::Matrix<double, 4, 4> pose0 = load_pose("C:/Users/jcds/Desktop/trico/hl2_5/pose/000061.bin").cast<double>();
-    Eigen::Matrix<double, 4, 4> pose1 = load_pose("C:/Users/jcds/Desktop/trico/hl2_5/pose/000065.bin").cast<double>();
-    Eigen::Matrix<double, 4, 4> pose2 = load_pose("C:/Users/jcds/Desktop/trico/hl2_5/pose/000067.bin").cast<double>();
+    //Eigen::Matrix<double, 4, 4> pose0 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000061.bin").cast<double>();
+    //Eigen::Matrix<double, 4, 4> pose1 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000065.bin").cast<double>();
+    //Eigen::Matrix<double, 4, 4> pose2 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000067.bin").cast<double>();
+    Eigen::Matrix<double, 4, 4> pose0 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000062.bin").cast<double>();
+    Eigen::Matrix<double, 4, 4> pose1 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000072.bin").cast<double>();
+    Eigen::Matrix<double, 4, 4> pose2 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000082.bin").cast<double>();
 
     pose0.transposeInPlace();
     pose1.transposeInPlace();
@@ -78,6 +81,7 @@ int main()
     linear_TFT(A.data(), 4 * 7, TFT.data());
     R_t_from_TFT(TFT.data(), points2D.data(), 7, P2.data(), P3.data());
     fixed_cost_from_A(A.data(), 4 * 7, Ac.data());
+    double scale = compute_scale(points2D.data(), p11.data(), 7, P2.data(), P3.data());
 
     std::cout << "POSES" << std::endl;
     std::cout << pose01 << std::endl;
@@ -88,6 +92,8 @@ int main()
     std::cout << P2.col(3) / P2(2, 3) << std::endl;
     std::cout << pose02.col(3) / pose01(2, 3) << std::endl;
     std::cout << P3.col(3) / P2(2, 3) << std::endl;
+    std::cout << "EST SCALE: " << scale << std::endl;
+    std::cout << "GT SCALE: " << sqrt(pose01.data()[9] * pose01.data()[9] + pose01.data()[10] * pose01.data()[10] + pose01.data()[11] * pose01.data()[11]) << std::endl;
 
     std::cout << "COST" << std::endl;
     std::cout << TFT.transpose() * Ac * TFT << std::endl;

@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <iostream>
 #include <Eigen/Eigen>
 #include <Eigen/QR>
 #include <Eigen/Geometry>
@@ -587,3 +588,39 @@ R_t_from_TFT
 }
 
 
+template <typename T>
+T compute_scale(T const* points_2D, T const* points_3D, int count, T* RT01, T*)
+{
+    float* scales = new float[count];
+
+    for (int i = 0; i < count; ++i)
+    {
+        T X1 = points_3D[(3 * i) + 0];
+        T Y1 = points_3D[(3 * i) + 1];
+        T Z1 = points_3D[(3 * i) + 2];
+        T x2 = points_2D[(6 * i) + 2];
+        T y2 = points_2D[(6 * i) + 3];
+        T R_x2 = RT01[0] * x2 + RT01[1] * y2 + RT01[2];
+        T R_y2 = RT01[3] * x2 + RT01[4] * y2 + RT01[5];
+        T R_w2 = RT01[6] * x2 + RT01[7] * y2 + RT01[8];
+        T ntx = -RT01[9];
+        T nty = -RT01[10];
+        T ntz = -RT01[11];
+        T R_ntx = RT01[0] * ntx + RT01[1] * nty + RT01[2] * ntz;
+        T R_nty = RT01[3] * ntx + RT01[4] * nty + RT01[5] * ntz;
+        T R_ntz = RT01[6] * ntx + RT01[7] * nty + RT01[8] * ntz;
+        T tR2_x = R_nty * R_w2 - R_ntz * R_y2;
+        T tR2_y = R_ntz * R_x2 - R_ntx * R_w2;
+        T tR2_z = R_ntx * R_y2 - R_nty * R_x2;
+        T PR2_x = Y1 * R_w2 - Z1 * R_y2;
+        T PR2_y = Z1 * R_x2 - X1 * R_w2;
+        T PR2_z = X1 * R_y2 - Y1 * R_x2;
+        T num2 = PR2_x * PR2_x + PR2_y * PR2_y + PR2_z * PR2_z;
+        T den2 = tR2_x * tR2_x + tR2_y * tR2_y + tR2_z * tR2_z; // TODO: if zero??
+        T rho = sqrt(num2 / den2);
+        scales[i] = rho;
+    }
+
+    std::sort(scales, scales + count);
+    return scales[count / 2]; // TODO: median?
+}
