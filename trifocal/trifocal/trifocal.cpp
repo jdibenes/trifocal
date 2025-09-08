@@ -401,7 +401,7 @@ void trifocal_R_t(float const* p2d_1, float const* p2d_2, float const* p2d_3, fl
     memcpy(r2, r02.data(), 3 * sizeof(float));
     memcpy(t1, t01.data(), 3 * sizeof(float));
     memcpy(t2, t02.data(), 3 * sizeof(float));
-   
+
     if (s1) { *s1 = world_scale; }
     if (s2) { *s2 = local_scale; }
 }
