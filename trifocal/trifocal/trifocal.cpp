@@ -166,7 +166,7 @@ static void epipoles_from_TFT(Eigen::Ref<const Eigen::Matrix<float, 27, 1>> cons
 // OK
 static void linear_TFT(Eigen::Ref<const Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>> const& A, Eigen::Ref<Eigen::Matrix<float, 27, 1>> result, float threshold = 0)
 {
-    Eigen::Matrix<float, 27, 1> t = -(A.bdcSvd(Eigen::ComputeThinU).matrixU().col(26));
+    Eigen::Matrix<float, 27, 1> t = -(A.jacobiSvd(Eigen::ComputeFullU).matrixU().col(26)); // Previously BDC SVD
 
     Eigen::Matrix<float, 3, 2> e;
 
@@ -180,11 +180,11 @@ static void linear_TFT(Eigen::Ref<const Eigen::Matrix<float, Eigen::Dynamic, Eig
     E << Eigen::kroneckerProduct(I3, Eigen::kroneckerProduct(e.col(1), I3)),
          Eigen::kroneckerProduct(I9,                        -e.col(0));
 
-    Eigen::BDCSVD<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>> svd_E = E.bdcSvd(Eigen::ComputeThinU);
+    Eigen::JacobiSVD<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>> svd_E = E.jacobiSvd(Eigen::ComputeFullU);  // BDC SVD gives NaN sometimes, Jacobi SVD doesn't
     if (threshold > 0) { svd_E.setThreshold(threshold); }
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> Up = svd_E.matrixU()(Eigen::all, Eigen::seqN(0, svd_E.rank()));
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> Up = svd_E.matrixU()(Eigen::all, Eigen::seqN(0, svd_E.rank())); // Rank seems to be always 15
 
-    result = Up * ((A.transpose() * Up).bdcSvd(Eigen::ComputeThinV).matrixV()(Eigen::all, Eigen::last));
+    result = Up * ((A.transpose() * Up).jacobiSvd(Eigen::ComputeFullV).matrixV()(Eigen::all, Eigen::last)); // Previously BDC SVD
 }
 
 // OK
@@ -221,7 +221,7 @@ static void triangulate(Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P0, 
         ls_matrix(Eigen::seqN(0 * 2, 2), Eigen::all) = L0 * P0;
         ls_matrix(Eigen::seqN(1 * 2, 2), Eigen::all) = L1 * P1;
 
-        XYZW = ls_matrix.bdcSvd(Eigen::ComputeFullV).matrixV().col(3);
+        XYZW = ls_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().col(3); // Previously BDC SVD
 
         p3h.col(n) = XYZW / XYZW(3);
     }
