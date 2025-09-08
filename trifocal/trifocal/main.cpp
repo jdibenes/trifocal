@@ -1,17 +1,96 @@
-// trifocal_test.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
 
-#define GLOG_USE_GLOG_EXPORT
-#define GLOG_NO_ABBREVIATED_SEVERITIES
-#define CERES_MSVC_USE_UNDERSCORE_PREFIXED_BESSEL_FUNCTIONS
-#define NOMINMAX
-//#include <ceres/ceres.h>
-//#include <ceres/rotation.h>
 #include <iostream>
 #include "loader.h"
 #include "trifocal.h"
 
+int main()
+{
+    Eigen::Matrix<float, 4, 4> pose0 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000062.bin").transpose();
+    Eigen::Matrix<float, 4, 4> pose1 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000072.bin").transpose();
+    Eigen::Matrix<float, 4, 4> pose2 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000082.bin").transpose();
 
+    Eigen::Matrix<float, 4, 4> pose00h = pose0.inverse() * pose0;
+    Eigen::Matrix<float, 4, 4> pose01h = pose0.inverse() * pose1;
+    Eigen::Matrix<float, 4, 4> pose02h = pose0.inverse() * pose2;
+
+    Eigen::Matrix<float, 3, 4> pose00 = pose00h(Eigen::seqN(0, 3), Eigen::all);
+    Eigen::Matrix<float, 3, 4> pose01 = pose01h(Eigen::seqN(0, 3), Eigen::all);
+    Eigen::Matrix<float, 3, 4> pose02 = pose02h(Eigen::seqN(0, 3), Eigen::all);
+
+    Eigen::Matrix<float, 4, 7> p1h{
+        {1,   2, -3, -1.5, 4, -5, 1.5},
+        {2,  -1, -2,  1.2, 3,  4,  -6},
+        {10, 12, 15,    7, 9, 16,  19},
+        {1,   1,  1,    1, 1,  1,   1},
+    };
+
+    Eigen::Matrix<float, 3, 7> p1n = p1h.colwise().hnormalized();
+    
+    Eigen::Matrix<float, 3, 7> p11 = pose00 * p1h;
+    Eigen::Matrix<float, 3, 7> p21 = pose01 * p1h;
+    Eigen::Matrix<float, 3, 7> p31 = pose02 * p1h;
+
+    Eigen::Matrix<float, 2, 7> x11 = p11.colwise().hnormalized();
+    Eigen::Matrix<float, 2, 7> x21 = p21.colwise().hnormalized();
+    Eigen::Matrix<float, 2, 7> x31 = p31.colwise().hnormalized();
+
+    Eigen::Matrix<float, 3, 1> r1;
+    Eigen::Matrix<float, 3, 1> t1;
+    Eigen::Matrix<float, 3, 1> r2;
+    Eigen::Matrix<float, 3, 1> t2;
+
+    trifocal_R_t(x11.data(), x21.data(), x31.data(), x21.data(), p1n.data(), nullptr, r1.data(), t1.data(), r2.data(), t2.data(), nullptr, nullptr);
+
+    Eigen::AngleAxis<float> r12(r1.norm(), r1.normalized());
+    Eigen::AngleAxis<float> r13(r2.norm(), r2.normalized());
+
+    Eigen::Matrix<float, 3, 4> P2;
+    Eigen::Matrix<float, 3, 4> P3;
+
+    P2 << r12.toRotationMatrix(), t1;
+    P3 << r13.toRotationMatrix(), t2;
+
+    std::cout << "POSES" << std::endl;
+    std::cout << pose01 << std::endl;
+    std::cout << P2 << std::endl;
+    std::cout << pose02 << std::endl;
+    std::cout << P3 << std::endl;
+
+    Eigen::Matrix<float, 4, 4> P2f;
+    Eigen::Matrix<float, 4, 4> P3f;
+
+    P2f << P2, Eigen::Matrix<float, 1, 4>{0, 0, 0, 1};
+    P3f << P3, Eigen::Matrix<float, 1, 4>{0, 0, 0, 1};
+
+    Eigen::Matrix<float, 4, 4> e01 = P2f.inverse() * pose01h;
+    Eigen::Matrix<float, 4, 4> e02 = P3f.inverse() * pose02h;
+
+    std::cout << "ERRORS" << std::endl;
+    std::cout << e01 << std::endl;
+    std::cout << e02 << std::endl;
+
+    Eigen::Matrix<float, 3, 3> er1 = e01(Eigen::seqN(0, 3), Eigen::seqN(0, 3));
+    Eigen::Matrix<float, 3, 3> er2 = e02(Eigen::seqN(0, 3), Eigen::seqN(0, 3));
+
+    Eigen::AngleAxis<float> ea1(er1);
+    Eigen::AngleAxis<float> ea2(er2);
+
+    std::cout << "rotation errors: " << (ea1.angle() * (180.0 / 3.141592653589793238463)) << " | " << (ea2.angle() * (180.0 / 3.141592653589793238463)) << std::endl;
+    std::cout << "translation errors: " << (e01.col(3).hnormalized().norm()) << " | " << (e02.col(3).hnormalized().norm()) << std::endl;
+
+    return 0;
+}
+
+
+
+//std::cout << "IMAGE POINTS" << std::endl;
+//std::cout << p11 << std::endl;
+//std::cout << p21 << std::endl;
+//std::cout << p31 << std::endl;
+
+//Eigen::Matrix<double, 4, 4> pose0 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000061.bin").cast<double>();
+//Eigen::Matrix<double, 4, 4> pose1 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000065.bin").cast<double>();
+//Eigen::Matrix<double, 4, 4> pose2 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000067.bin").cast<double>();
 /*
 struct TrifocalReprojectionError
 {
@@ -25,192 +104,151 @@ struct TrifocalReprojectionError
         T const* const cameraJ,
         T const* const cameraK,
         T* residuals
-        ) const 
+        ) const
     {
     }
 };
 */
 
+// trifocal_test.cpp : This file contains the 'main' function. Program execution begins and ends there.
+//
 
-int main()
-{
-    //Eigen::Matrix<double, 4, 4> pose0 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000061.bin").cast<double>();
-    //Eigen::Matrix<double, 4, 4> pose1 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000065.bin").cast<double>();
-    //Eigen::Matrix<double, 4, 4> pose2 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000067.bin").cast<double>();
-    Eigen::Matrix<double, 4, 4> pose0 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000062.bin").cast<double>();
-    Eigen::Matrix<double, 4, 4> pose1 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000072.bin").cast<double>();
-    Eigen::Matrix<double, 4, 4> pose2 = load_pose("C:/Users/jcds/Documents/GitHub/xvoldor/demo/data/hl2_5/pose/000082.bin").cast<double>();
+//#define GLOG_USE_GLOG_EXPORT
+//#define GLOG_NO_ABBREVIATED_SEVERITIES
+//#define CERES_MSVC_USE_UNDERSCORE_PREFIXED_BESSEL_FUNCTIONS
+//#define NOMINMAX
+//#include <ceres/ceres.h>
+//#include <ceres/rotation.h>
+//Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor> A(4 * 7, 27);
+//Eigen::Matrix<float, 27, 1> TFT;
+//Eigen::Matrix<float, 3, 4> P2;
+//Eigen::Matrix<float, 3, 4> P3;
+//Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> points2D(6, 7);
+//points2D << x11, x21, x31;
+//Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> Ac(27, 27);
 
-    pose0.transposeInPlace();
-    pose1.transposeInPlace();
-    pose2.transposeInPlace();
+//build_A(points2D.data(), 7, A.data());
+//linear_TFT(A.data(), 4 * 7, TFT.data());
+//R_t_from_TFT(TFT.data(), points2D.data(), 7, P2.data(), P3.data());
+//fixed_cost_from_A(A.data(), 4 * 7, Ac.data());
+//double scale = compute_scale(points2D.data(), p11.data(), 7, P2.data(), P3.data());
+// 
+//std::cout << pose01.col(3) / pose01(2, 3) << std::endl;
+//std::cout << P2.col(3) / P2(2, 3) << std::endl;
+//std::cout << pose02.col(3) / pose01(2, 3) << std::endl;
+//std::cout << P3.col(3) / P2(2, 3) << std::endl;
+//std::cout << "EST SCALE: " << scale << std::endl;
+//std::cout << "GT SCALE: " << sqrt(pose01.data()[9] * pose01.data()[9] + pose01.data()[10] * pose01.data()[10] + pose01.data()[11] * pose01.data()[11]) << std::endl;
 
-    Eigen::Matrix<double, 3, 4> pose00 = (pose0.inverse() * pose0)(Eigen::seq(0, 3), Eigen::all);
-    Eigen::Matrix<double, 3, 4> pose01 = (pose0.inverse() * pose1)(Eigen::seq(0, 3), Eigen::all);
-    Eigen::Matrix<double, 3, 4> pose02 = (pose0.inverse() * pose2)(Eigen::seq(0, 3), Eigen::all);
+//std::cout << "COST" << std::endl;
+//std::cout << TFT.transpose() * Ac * TFT << std::endl;
 
-    Eigen::Matrix<double, 4, 7> p1{
-        {1,   2, -3, -1.5, 4, -5, 1.5},
-        {2,  -1, -2,  1.2, 3,  4,  -6},
-        {10, 12, 15,    7, 9, 16,  19},
-        {1,   1,  1,    1, 1,  1,   1},
-    };
-    
-    Eigen::Matrix<double, 3, 7> p11 = pose00 * p1;
-    Eigen::Matrix<double, 3, 7> p21 = pose01 * p1;
-    Eigen::Matrix<double, 3, 7> p31 = pose02 * p1;
+/*
+Eigen::Matrix<double, 6, 1> trip1;
+trip1 << x11.col(0), x21.col(0), x31.col(0);
+Eigen::Matrix<double, 6, 1> trip2;
+trip2 << x11.col(1), x21.col(1), x31.col(1);
+Eigen::Matrix<double, 6, 2> trip;
+trip << trip1, trip2;
 
-    std::cout << "IMAGE POINTS" << std::endl;
-    std::cout << p11 << std::endl;
-    std::cout << p21 << std::endl;
-    std::cout << p31 << std::endl;
+Eigen::Matrix<double, 4, 2> trip_3D;
+Eigen::Matrix<double, 3, 4 * 3> cim;
+cim << pose00, pose01, pose02;
 
-    Eigen::Matrix<double, 2, 7> x11 = p11.colwise().hnormalized();
-    Eigen::Matrix<double, 2, 7> x21 = p21.colwise().hnormalized();
-    Eigen::Matrix<double, 2, 7> x31 = p31.colwise().hnormalized();
+triangulate(cim.data(), 3, trip.data(), 2, trip_3D.data());
 
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor> A(4 * 7, 27);
-    Eigen::Matrix<double, 27, 1> TFT;
-    Eigen::Matrix<double, 3, 4> P2;
-    Eigen::Matrix<double, 3, 4> P3;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> points2D(6, 7);
-    points2D << x11, x21, x31;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> Ac(27, 27);
-
-    build_A(points2D.data(), 7, A.data());
-    linear_TFT(A.data(), 4 * 7, TFT.data());
-    R_t_from_TFT(TFT.data(), points2D.data(), 7, P2.data(), P3.data());
-    fixed_cost_from_A(A.data(), 4 * 7, Ac.data());
-    double scale = compute_scale(points2D.data(), p11.data(), 7, P2.data(), P3.data());
-
-    std::cout << "POSES" << std::endl;
-    std::cout << pose01 << std::endl;
-    std::cout << P2 << std::endl;
-    std::cout << pose02 << std::endl;
-    std::cout << P3 << std::endl;
-    std::cout << pose01.col(3) / pose01(2, 3) << std::endl;
-    std::cout << P2.col(3) / P2(2, 3) << std::endl;
-    std::cout << pose02.col(3) / pose01(2, 3) << std::endl;
-    std::cout << P3.col(3) / P2(2, 3) << std::endl;
-    std::cout << "EST SCALE: " << scale << std::endl;
-    std::cout << "GT SCALE: " << sqrt(pose01.data()[9] * pose01.data()[9] + pose01.data()[10] * pose01.data()[10] + pose01.data()[11] * pose01.data()[11]) << std::endl;
-
-    std::cout << "COST" << std::endl;
-    std::cout << TFT.transpose() * Ac * TFT << std::endl;
-
-
-
-    return 0;
-
-
-    /*
-    Eigen::Matrix<double, 6, 1> trip1;
-    trip1 << x11.col(0), x21.col(0), x31.col(0);
-    Eigen::Matrix<double, 6, 1> trip2;
-    trip2 << x11.col(1), x21.col(1), x31.col(1);
-    Eigen::Matrix<double, 6, 2> trip;
-    trip << trip1, trip2;
-
-    Eigen::Matrix<double, 4, 2> trip_3D;
-    Eigen::Matrix<double, 3, 4 * 3> cim;
-    cim << pose00, pose01, pose02;
-
-    triangulate(cim.data(), 3, trip.data(), 2, trip_3D.data());
-
-    std::cout << "Triangulation" << std::endl;
-    std::cout << trip_3D.colwise().hnormalized() << std::endl;
+std::cout << "Triangulation" << std::endl;
+std::cout << trip_3D.colwise().hnormalized() << std::endl;
 
 
 
 
-    Eigen::Matrix<double, 3, 3> t_x;
-    crossM(pose01.data() + 9, t_x.data());
-    Eigen::Matrix<double, 3, 3> E01 = t_x * pose01(Eigen::seq(0, 2), Eigen::seq(0, 2));
-    Eigen::Matrix<double, 4, 1> frt2D1;
-    frt2D1 << x11.col(0), x21.col(0);
-    Eigen::Matrix<double, 3, 4> P_est;
+Eigen::Matrix<double, 3, 3> t_x;
+crossM(pose01.data() + 9, t_x.data());
+Eigen::Matrix<double, 3, 3> E01 = t_x * pose01(Eigen::seq(0, 2), Eigen::seq(0, 2));
+Eigen::Matrix<double, 4, 1> frt2D1;
+frt2D1 << x11.col(0), x21.col(0);
+Eigen::Matrix<double, 3, 4> P_est;
 
-    R_t_from_E(E01.data(), frt2D1.data(), 1, P_est.data());
+R_t_from_E(E01.data(), frt2D1.data(), 1, P_est.data());
 
-    std::cout << "POSE" << std::endl;
-    std::cout << pose01 << std::endl;
-    std::cout << P_est << std::endl;
-    std::cout << pose01.col(3).colwise().hnormalized() << std::endl;
-    std::cout << P_est.col(3).colwise().hnormalized() << std::endl;
-
-
-
-    return 0;
-    */
-
-    //Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor> A(4 * 7, 27);
-    
-    Eigen::Matrix<double, 27, 1> TFT_P;
-    Eigen::Matrix<double, 3, 4> P1;
-    
+std::cout << "POSE" << std::endl;
+std::cout << pose01 << std::endl;
+std::cout << P_est << std::endl;
+std::cout << pose01.col(3).colwise().hnormalized() << std::endl;
+std::cout << P_est.col(3).colwise().hnormalized() << std::endl;
 
 
-    //std::cout << pose00(Eigen::all, 3) / pose01(2, 3) << std::endl;
-    //std::cout << pose01(Eigen::all, 3) / pose01(2, 3) << std::endl;
-    //std::cout << pose02(Eigen::all, 3) / pose02(2, 3) << std::endl;
 
-    build_A(points2D.data(), 7, A.data());
-    linear_TFT(A.data(), 4 * 7, TFT.data());
-    TFT_from_P(pose00.data(), pose01.data(), pose02.data(), TFT_P.data());
+return 0;
+*/
 
-    Eigen::HouseholderQR<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor>> qr(A.rows(), A.cols());
-    qr.compute(A);
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> R = qr.matrixQR().triangularView<Eigen::Upper>();
+//Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor> A(4 * 7, 27);
 
-    std::cout << "QR" << std::endl;
-    std::cout << R << std::endl;
-    std::cout << "SIZE: " << R.rows() << ", " << R.cols() << std::endl;
+//Eigen::Matrix<double, 27, 1> TFT_P;
+//Eigen::Matrix<double, 3, 4> P1;
 
 
-    std::cout << "TFT" << std::endl;
-    std::cout << TFT << std::endl;
-    std::cout << "TFT_error" << std::endl;
-    std::cout << A * TFT << std::endl;
-    std::cout << "TFT_P" << std::endl;
-    std::cout << TFT_P << std::endl;
-    std::cout << "TFT_P_error" << std::endl;
-    std::cout << A * TFT_P << std::endl;
-    /*
-    * , P1, P2, P3
-    std::cout << pose00 << std::endl;
-    std::cout << P1 << std::endl;
-    std::cout << pose01 / pose01(2, 3) << std::endl;
-    std::cout << P2 / P2(2, 3) << std::endl;
-    std::cout << pose02 / pose02(2, 3) << std::endl;
-    std::cout << P3 / P3(2, 3) << std::endl;
-    */
-   
 
-    return 0;
+//std::cout << pose00(Eigen::all, 3) / pose01(2, 3) << std::endl;
+//std::cout << pose01(Eigen::all, 3) / pose01(2, 3) << std::endl;
+//std::cout << pose02(Eigen::all, 3) / pose02(2, 3) << std::endl;
 
-    /*
-     std::cout << p11 << std::endl;
-    std::cout << x11 << std::endl;
-    std::cout << p21 << std::endl;
-    std::cout << x21 << std::endl;
-    std::cout << p31 << std::endl;
-    std::cout << x31 << std::endl;
-    
+//build_A(points2D.data(), 7, A.data());
+//linear_TFT(A.data(), 4 * 7, TFT.data());
+//TFT_from_P(pose00.data(), pose01.data(), pose02.data(), TFT_P.data());
 
-    
-    */
-    /*
-    //std::cout << A << std::endl;
-    
-    std::cout << TFT << std::endl;
-    
-    */
+//Eigen::HouseholderQR<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::AutoAlign | Eigen::RowMajor>> qr(A.rows(), A.cols());
+//qr.compute(A);
+//Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> R = qr.matrixQR().triangularView<Eigen::Upper>();
 
-    //std::cout << x11 << std::endl;
-    //std::cout << x21 << std::endl;
-    //std::cout << x31 << std::endl;
-}
+//std::cout << "QR" << std::endl;
+//std::cout << R << std::endl;
+//std::cout << "SIZE: " << R.rows() << ", " << R.cols() << std::endl;
 
+
+//std::cout << "TFT" << std::endl;
+//std::cout << TFT << std::endl;
+//std::cout << "TFT_error" << std::endl;
+//std::cout << A * TFT << std::endl;
+//std::cout << "TFT_P" << std::endl;
+//std::cout << TFT_P << std::endl;
+//std::cout << "TFT_P_error" << std::endl;
+//std::cout << A * TFT_P << std::endl;
+/*
+* , P1, P2, P3
+std::cout << pose00 << std::endl;
+std::cout << P1 << std::endl;
+std::cout << pose01 / pose01(2, 3) << std::endl;
+std::cout << P2 / P2(2, 3) << std::endl;
+std::cout << pose02 / pose02(2, 3) << std::endl;
+std::cout << P3 / P3(2, 3) << std::endl;
+*/
+
+
+//return 0;
+
+/*
+ std::cout << p11 << std::endl;
+std::cout << x11 << std::endl;
+std::cout << p21 << std::endl;
+std::cout << x21 << std::endl;
+std::cout << p31 << std::endl;
+std::cout << x31 << std::endl;
+
+
+
+*/
+/*
+//std::cout << A << std::endl;
+
+std::cout << TFT << std::endl;
+
+*/
+
+//std::cout << x11 << std::endl;
+//std::cout << x21 << std::endl;
+//std::cout << x31 << std::endl;
 
 //auto flow0 = load_flow("C:/Users/jcds/Desktop/trico/hl2_5/flow_gt/000061.flo");
      //std::cout << flow0.rows() << ", " << flow0.cols() << std::endl;
