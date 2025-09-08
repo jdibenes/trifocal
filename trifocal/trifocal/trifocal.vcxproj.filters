@@ -24,12 +24,18 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="trifocal.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="loader.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="lock.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="trifocal_templates.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="trifocal.h">

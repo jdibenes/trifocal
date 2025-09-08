@@ -128,11 +128,13 @@
     <ClCompile Include="loader.cpp" />
     <ClCompile Include="lock.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="trifocal.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="loader.h" />
     <ClInclude Include="lock.h" />
     <ClInclude Include="trifocal.h" />
+    <ClInclude Include="trifocal_templates.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
