@@ -329,7 +329,7 @@ static float R_t_from_TFT(Eigen::Ref<const Eigen::Matrix<float, 27, 1>> const& T
         den += p3_t3.dot(p3_t3);
     }
 
-    float scale = num / den;
+    float scale = num / den; // TODO: Mean or Median?
 
     c2.col(3) = scale * c2.col(3);
 
@@ -367,7 +367,7 @@ static float compute_scale(float const* p2d, float const* p3d, Eigen::Ref<const 
 
     if (valid <= 0) { return 0; }
 
-    std::sort(scales, scales + valid);
+    std::sort(scales, scales + valid); // TODO: Mean or Median?
     return scales[valid / 2];
 }
 
