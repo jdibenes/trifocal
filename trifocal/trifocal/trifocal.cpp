@@ -1,9 +1,6 @@
 
 #define EIGEN_NO_AUTOMATIC_RESIZING
 
-#include <iostream>
-#include <thread>
-#include <random>
 #include <Eigen/Eigen>
 #include <Eigen/Geometry>
 #include <unsupported/Eigen/src/KroneckerProduct/KroneckerTensorProduct.h>
@@ -389,11 +386,11 @@ void trifocal_R_t(float const* p2d_1, float const* p2d_2, float const* p2d_3, fl
 
     if (tft) { memcpy(tft, TFT.data(), 27 * sizeof(float)); }
 
-    Eigen::Matrix3f RR01 = P2(Eigen::all, Eigen::seqN(0, 3));
-    Eigen::Matrix3f RR02 = P3(Eigen::all, Eigen::seqN(0, 3));
+    Eigen::Matrix<float, 3, 3> R2 = P2(Eigen::all, Eigen::seqN(0, 3));
+    Eigen::Matrix<float, 3, 3> R3 = P3(Eigen::all, Eigen::seqN(0, 3));
 
-    Eigen::AngleAxis<float> R01(RR01);
-    Eigen::AngleAxis<float> R02(RR02);
+    Eigen::AngleAxis<float> R01(R2);
+    Eigen::AngleAxis<float> R02(R3);
 
     Eigen::Matrix<float, 3, 1> r01 = R01.angle() * R01.axis();
     Eigen::Matrix<float, 3, 1> r02 = R02.angle() * R02.axis();
