@@ -1,6 +1,4 @@
 
-//#define EIGEN_NO_AUTOMATIC_RESIZING
-
 #include <iostream>
 #include <Eigen/Eigen>
 #include <Eigen/Geometry>
@@ -10,54 +8,38 @@
 // Functions
 //-----------------------------------------------------------------------------
 
-/*
 // OK
-static void normalize_points(Eigen::Ref<const Eigen::Matrix<float, 2, 7>> const& p_i, Eigen::Ref<Eigen::Matrix<float, 2, 7>> p_o, Eigen::Ref<Eigen::Matrix<float, 3, 3>> N)
+struct
+result_normalize_points
+{
+    Eigen::Matrix<float, 3, 3> H;
+    Eigen::MatrixXf p; // 2xN
+};
+
+// OK
+static
+result_normalize_points
+normalize_points
+(
+    Eigen::Ref<const Eigen::MatrixXf> const& p_i // 2xN
+)
 {
     Eigen::Matrix<float, 2, 1> p0 = p_i.rowwise().mean();
-
     float s = std::sqrt(2.0f) / (p_i.colwise() - p0).colwise().norm().mean();
 
-    N = Eigen::Matrix<float, 3, 3>
+    result_normalize_points result;
+
+    result.H = Eigen::Matrix<float, 3, 3>
     {
         {   s, 0.0f, -s * p0(0)},
         {0.0f,    s, -s * p0(1)},
         {0.0f, 0.0f,       1.0f},
     };
-    
-    p_o = N(Eigen::seqN(0, 2), Eigen::all) * p_i.colwise().homogeneous();
+
+    result.p = result.H(Eigen::seqN(0, 2), Eigen::all) * p_i.colwise().homogeneous();
+
+    return result;
 }
-
-// OK
-static void transform_TFT(Eigen::Ref<const Eigen::Matrix<float, 27, 1>> const& tft_i, Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& M1, Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& M2, Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& M3, Eigen::Ref<Eigen::Matrix<float, 27, 1>> tft_o, bool inverse)
-{
-    Eigen::Matrix<float, 3, 3> t1_i = tft_i(Eigen::seqN( 0, 9)).reshaped(3, 3);
-    Eigen::Matrix<float, 3, 3> t2_i = tft_i(Eigen::seqN( 9, 9)).reshaped(3, 3);
-    Eigen::Matrix<float, 3, 3> t3_i = tft_i(Eigen::seqN(18, 9)).reshaped(3, 3);
-
-    Eigen::Matrix<float, 27, 1> t_o;
-
-    if (!inverse)
-    {
-        Eigen::Matrix<float, 3, 3> M1i = M1.inverse();
-        t_o << (M2 * (M1i(0, 0) * t1_i + M1i(1, 0) * t2_i + M1i(2, 0) * t3_i) * M3.transpose()).reshaped(9, 1),
-               (M2 * (M1i(0, 1) * t1_i + M1i(1, 1) * t2_i + M1i(2, 1) * t3_i) * M3.transpose()).reshaped(9, 1),
-               (M2 * (M1i(0, 2) * t1_i + M1i(1, 2) * t2_i + M1i(2, 2) * t3_i) * M3.transpose()).reshaped(9, 1);
-    }
-    else
-    {
-        Eigen::Matrix<float, 3, 3> M2i = M2.inverse();
-        Eigen::Matrix<float, 3, 3> M3i = M3.inverse();
-        t_o << (M2i * (M1(0, 0) * t1_i + M1(1, 0) * t2_i + M1(2, 0) * t3_i) * M3i.transpose()).reshaped(9, 1),
-               (M2i * (M1(0, 1) * t1_i + M1(1, 1) * t2_i + M1(2, 1) * t3_i) * M3i.transpose()).reshaped(9, 1),
-               (M2i * (M1(0, 2) * t1_i + M1(1, 2) * t2_i + M1(2, 2) * t3_i) * M3i.transpose()).reshaped(9, 1);
-    }
-
-    tft_o = t_o.normalized();
-}
-*/
-
-
 
 // OK
 static
@@ -69,36 +51,250 @@ cross_matrix
 {
     Eigen::Matrix<float, 3, 3> M;
 
-    M <<     0,   (-v(2)), ( v(1)),
-         ( v(2)),     0,   (-v(0)),
-         (-v(1)), ( v(0)),     0;
+    M(0, 0) = 0;
+    M(1, 0) =  v(2);
+    M(2, 0) = -v(1);
+    M(0, 1) = -v(2);
+    M(1, 1) = 0;
+    M(2, 1) =  v(0);
+    M(0, 2) =  v(1);
+    M(1, 2) = -v(0);
+    M(2, 2) = 0;
 
     return M;
 }
 
+//-----------------------------------------------------------------------------
+// M-View Geometry
+//-----------------------------------------------------------------------------
 
+// OK
+static
+Eigen::MatrixXf // 4xN
+triangulate
+(
+    Eigen::Ref<const Eigen::MatrixXf> const& P,  // 3x4*M
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d // 2*MxN
+)
+{
+    int const M = P.cols() / 4;
+    int const N = p2d.cols();
 
+    Eigen::Matrix<float, 2, 3> L
+    {
+        {0.0f, -1.0f, 0.0f},
+        {1.0f,  0.0f, 0.0f},
+    };
+
+    Eigen::MatrixXf ls_matrix(2 * M, 4);
+    Eigen::MatrixXf p3d_h(4, N);
+
+    for (int n = 0; n < N; ++n)
+    {
+        for (int m = 0; m < M; ++m)
+        {
+            L(0, 2) =  p2d((2 * m) + 1, n);
+            L(1, 2) = -p2d((2 * m) + 0, n);
+
+            ls_matrix(Eigen::seqN(2 * m, 2), Eigen::all) = L * P(Eigen::all, Eigen::seqN(4 * m, 4));
+        }
+
+        p3d_h.col(n) = ls_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().col(3); // Previously BDC SVD, Full = Thin
+    }
+
+    return p3d_h;
+}
+
+//-----------------------------------------------------------------------------
+// 2-View Geometry
+//-----------------------------------------------------------------------------
+
+// OK
+static
+float
+compute_scale
+(
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d, // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p3d, // 3xN
+    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P2
+)
+{
+    int const N = p2d.cols();
+
+    Eigen::Matrix<float, 3, Eigen::Dynamic> X3 = P2(Eigen::all, Eigen::seqN(0, 3)) * p3d;
+    Eigen::Matrix<float, 3, Eigen::Dynamic> p3 = p2d.colwise().homogeneous();
+    Eigen::Matrix<float, 3, 1> p3_X3;
+    Eigen::Matrix<float, 3, 1> p3_t3;
+
+    float num = 0;
+    float den = 0;
+
+    for (int i = 0; i < N; ++i)
+    {
+        p3_X3 = p3.col(i).cross(X3.col(i));
+        p3_t3 = p3.col(i).cross(P2.col(3));
+
+        num -= p3_X3.dot(p3_t3);
+        den += p3_t3.dot(p3_t3);
+    }
+
+    return num / den; // TODO: Mean or Median or ... ?
+}
+
+// OK
+static
+float
+compute_scale_los
+(
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d, // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p3d, // 3xN
+    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P2
+)
+{
+    int const N = p2d.cols();
+
+    Eigen::Matrix<float, 3, Eigen::Dynamic> X3 = P2(Eigen::all, Eigen::seqN(0, 3)) * p3d;
+    Eigen::Matrix<float, 3, Eigen::Dynamic> p3 = p2d.colwise().homogeneous();
+
+    float s = 0;
+    for (int i = 0; i < N; ++i) { s += p3.col(i).cross(X3.col(i)).norm() / p3.col(i).cross(P2.col(3)).norm(); }
+    return s / N; // TODO: Mean or Median or ... ?
+}
+
+// OK
+struct
+result_R_t_from_E
+{
+    Eigen::Matrix<float, 3, 4> P;
+    Eigen::MatrixXf p3d_h;
+};
+
+// OK
+static
+result_R_t_from_E
+R_t_from_E
+(
+    Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& E,
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d_1, // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d_2, // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p3d_1, // 3xN
+    bool use_prior
+)
+{
+    int const N = p2d_1.cols();
+
+    Eigen::MatrixXf p2d(4, N);
+
+    p2d(Eigen::seqN(0, 2), Eigen::all) = p2d_1;
+    p2d(Eigen::seqN(2, 2), Eigen::all) = p2d_2;
+
+    // TODO: Constant
+    Eigen::Matrix<float, 3, 3> W
+    {
+        {0.0f, -1.0f, 0.0f},
+        {1.0f,  0.0f, 0.0f},
+        {0.0f,  0.0f, 1.0f},
+    };
+
+    Eigen::JacobiSVD<Eigen::Matrix<float, 3, 3>> E_svd = E.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV); // Full = Thin
+
+    Eigen::Matrix<float, 3, 3> U  = E_svd.matrixU();
+    Eigen::Matrix<float, 3, 3> Vt = E_svd.matrixV().transpose();
+
+    Eigen::Matrix<float, 3, 3> R1 = U * W             * Vt;
+    Eigen::Matrix<float, 3, 3> R2 = U * W.transpose() * Vt;
+
+    if (R1.determinant() < 0) { R1 = -R1; } // Self assign
+    if (R2.determinant() < 0) { R2 = -R2; } // Self assign
+
+    Eigen::Matrix<float, 3, 1> pt = U.col(2);
+    Eigen::Matrix<float, 3, 1> nt = -pt;
+
+    Eigen::Matrix<float, 3, 4> P1 = Eigen::Matrix<float, 3, 4>::Identity(); // TODO: constant
+    Eigen::Matrix<float, 3, 4> P2;
+    Eigen::Matrix<float, 3, 8> PX;
+
+    result_R_t_from_E result;
+    Eigen::MatrixXf XYZW;
+    int64_t max_count = -1;
+
+    if (use_prior)
+    { 
+        XYZW = p3d_1.colwise().homogeneous();
+        result.p3d_h = XYZW;
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        switch (i)
+        {
+        case 0:
+            P2(Eigen::all, Eigen::seqN(0, 3)) = R1;
+            P2.col(3) = pt;
+            break;
+        case 1:
+            P2(Eigen::all, Eigen::seqN(0, 3)) = R1;
+            P2.col(3) = nt;
+            break;
+        case 2:
+            P2(Eigen::all, Eigen::seqN(0, 3)) = R2;
+            P2.col(3) = pt;
+            break;
+        case 3:
+            P2(Eigen::all, Eigen::seqN(0, 3)) = R2;
+            P2.col(3) = nt;
+            break;
+        }
+
+        if (!use_prior) 
+        {
+            PX(Eigen::all, Eigen::seqN(0, 4)) = P1;
+            PX(Eigen::all, Eigen::seqN(4, 4)) = P2;
+
+            XYZW = triangulate(PX, p2d).colwise().hnormalized().colwise().homogeneous(); // OK
+        }
+        else
+        {
+            P2.col(3) = compute_scale(p2d_2, p3d_1, P2) * P2.col(3); // Self assign // OK
+        }
+
+        int64_t count = ((P1 * XYZW).row(2).array() > 0).count() + ((P2 * XYZW).row(2).array() > 0).count();
+        if (count < max_count) { continue; }
+        max_count = count;
+
+        result.P = P2;
+        if (!use_prior) { result.p3d_h = XYZW; }
+    }
+
+    return result;
+}
+
+//-----------------------------------------------------------------------------
+// 3-View Geometry
+//-----------------------------------------------------------------------------
 
 // OK
 static
 Eigen::MatrixXf // 27x4*N
 build_A
 (
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d // 6xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d_1, // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d_2, // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d_3  // 2xN
 )
 {
-    int const N = p2d.cols();
+    int const N = p2d_1.cols();
 
     Eigen::MatrixXf A(27, 4 * N);
 
     for (int i = 0; i < N; ++i)
     {
-        float x1 = p2d(0, i);
-        float y1 = p2d(1, i);
-        float x2 = p2d(2, i);
-        float y2 = p2d(3, i);
-        float x3 = p2d(4, i);
-        float y3 = p2d(5, i);
+        float x1 = p2d_1(0, i);
+        float y1 = p2d_1(1, i);
+        float x2 = p2d_2(0, i);
+        float y2 = p2d_2(1, i);
+        float x3 = p2d_3(0, i);
+        float y3 = p2d_3(1, i);
 
         int b = 4 * i;
 
@@ -298,166 +494,20 @@ linear_TFT
 
     result.TFT = Up * tp;
 
-    result.P2 << ap(Eigen::seqN(0, 9)).reshaped(3, 3), e.col(0);
-    result.P3 << ap(Eigen::seqN(9, 9)).reshaped(3, 3), e.col(1);
+    result.P2(Eigen::all, Eigen::seqN(0, 3)) = ap(Eigen::seqN(0, 9)).reshaped(3, 3);
+    result.P2.col(3) = e.col(0);
+    result.P3(Eigen::all, Eigen::seqN(0, 3)) = ap(Eigen::seqN(9, 9)).reshaped(3, 3);
+    result.P3.col(3) = e.col(1);
 
     return result;
 }
 
 // OK
-static
-Eigen::MatrixXf // 4xN
-triangulate
-(
-    Eigen::Ref<const Eigen::MatrixXf> const& P,  // 3x4*M
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d // 2*MxN
-)
+struct
+result_R_t_from_TFT
 {
-    int const M = P.cols() / 4;
-    int const N = p2d.cols();
-
-    Eigen::Matrix<float, 2, 3> L
-    {
-        {0.0f, -1.0f, 0.0f},
-        {1.0f,  0.0f, 0.0f},
-    };
-
-    Eigen::MatrixXf ls_matrix(2 * M, 4);
-    Eigen::MatrixXf p3d_h(4, N);
-
-    for (int n = 0; n < N; ++n)
-    {
-        for (int m = 0; m < M; ++m)
-        {
-            L(0, 2) =  p2d((2 * m) + 1, n);
-            L(1, 2) = -p2d((2 * m) + 0, n);
-
-            ls_matrix(Eigen::seqN(2 * m, 2), Eigen::all) = L * P(Eigen::all, Eigen::seqN(4 * m, 4));
-        }
-
-        p3d_h.col(n) = ls_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().col(3); // Previously BDC SVD, Full = Thin
-    }
-
-    return p3d_h;
-}
-
-// OK
-static
-float
-compute_scale
-(
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d, // 2xN
-    Eigen::Ref<const Eigen::MatrixXf> const& p3d, // 3xN
-    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P2
-)
-{
-    int const N = p2d.cols();
-
-    Eigen::Matrix<float, 3, Eigen::Dynamic> X3 = P2(Eigen::all, Eigen::seqN(0, 3)) * p3d;
-    Eigen::Matrix<float, 3, Eigen::Dynamic> p3 = p2d.colwise().homogeneous();
-    Eigen::Matrix<float, 3, 1> p3_X3;
-    Eigen::Matrix<float, 3, 1> p3_t3;
-
-    float num = 0;
-    float den = 0;
-
-    for (int i = 0; i < N; ++i)
-    {
-        p3_X3 = p3.col(i).cross(X3.col(i));
-        p3_t3 = p3.col(i).cross(P2.col(3));
-
-        num -= p3_X3.dot(p3_t3);
-        den += p3_t3.dot(p3_t3);
-    }
-
-    return num / den;
-}
-
-// OK
-struct result_R_t_from_E
-{
-    Eigen::Matrix<float, 3, 4> P;
-    Eigen::MatrixXf p3d_h; // 4xN
-};
-
-// OK
-static
-result_R_t_from_E
-R_t_from_E
-(
-    Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& E,
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d_1, // 2xN
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d_2  // 2xN
-)
-{
-    int const N = p2d_1.cols();
-
-    Eigen::MatrixXf p2d(4, N);
-
-    p2d(Eigen::seqN(0, 2), Eigen::all) = p2d_1;
-    p2d(Eigen::seqN(2, 2), Eigen::all) = p2d_2;
-
-    Eigen::Matrix<float, 3, 3> W
-    {
-        {0.0f, -1.0f, 0.0f},
-        {1.0f,  0.0f, 0.0f},
-        {0.0f,  0.0f, 1.0f},
-    };
-
-    Eigen::JacobiSVD<Eigen::Matrix<float, 3, 3>> E_svd = E.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV); // Full = Thin
-
-    Eigen::Matrix<float, 3, 3> U  = E_svd.matrixU();
-    Eigen::Matrix<float, 3, 3> Vt = E_svd.matrixV().transpose();
-
-    Eigen::Matrix<float, 3, 3> R1 = U * W             * Vt;
-    Eigen::Matrix<float, 3, 3> R2 = U * W.transpose() * Vt;
-
-    if (R1.determinant() < 0) { R1 = -R1; } // Self assign
-    if (R2.determinant() < 0) { R2 = -R2; } // Self assign
-
-    Eigen::Matrix<float, 3, 1> pt = U.col(2);
-    Eigen::Matrix<float, 3, 1> nt = -pt;
-
-    Eigen::Matrix<float, 3, 4> P0 = Eigen::Matrix<float, 3, 4>::Identity(); // TODO: constant;
-    Eigen::Matrix<float, 3, 4> P1;
-    Eigen::Matrix<float, 3, 8> PX; 
-
-    Eigen::MatrixXf XYZW(4, N);
-
-    int64_t max_count = -1;
-
-    result_R_t_from_E result;
-
-    for (int i = 0; i < 4; ++i)
-    {
-        switch (i)
-        {
-        case 0: P1 << R1, pt; break;
-        case 1: P1 << R1, nt; break;
-        case 2: P1 << R2, pt; break;
-        case 3: P1 << R2, nt; break;
-        }
-
-        PX << P0, P1;
-
-        XYZW = triangulate(PX, p2d).colwise().hnormalized().colwise().homogeneous(); // OK
-
-        int64_t count = ((P0 * XYZW).row(2).array() > 0).count() + ((P1 * XYZW).row(2).array() > 0).count();
-        if (count < max_count) { continue; }
-        max_count = count;
-
-        result.P = P1;
-        result.p3d_h = XYZW;
-    }
-
-    return result;
-}
-
-// OK
-struct result_R_t_from_TFT
-{
-    result_R_t_from_E v1;
     result_R_t_from_E v2;
+    result_R_t_from_E v3;
 };
 
 // OK
@@ -468,9 +518,13 @@ R_t_from_TFT
     Eigen::Ref<const Eigen::Matrix<float, 27, 1>> const& TFT,
     Eigen::Ref<const Eigen::MatrixXf> const& p2d_1, // 2xN
     Eigen::Ref<const Eigen::MatrixXf> const& p2d_2, // 2xN
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d_3 // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p2d_3, // 2xN
+    Eigen::Ref<const Eigen::MatrixXf> const& p3d_1, // 3xN
+    bool use_prior
 )
 {
+    int const N = p2d_1.cols();
+
     Eigen::Matrix<float, 3, 2> e = epipoles_from_TFT(TFT); // OK
 
     Eigen::Matrix<float, 3, 3> epi21_x = cross_matrix(e.col(0)); // OK
@@ -483,80 +537,113 @@ R_t_from_TFT
     Eigen::Matrix<float, 3, 3> D21;
     Eigen::Matrix<float, 3, 3> D31;
 
-    D21 << (T1             * e.col(1)), (T2             * e.col(1)), (T3             * e.col(1));
-    D31 << (T1.transpose() * e.col(0)), (T2.transpose() * e.col(0)), (T3.transpose() * e.col(0));
+    D21.col(0) = T1 * e.col(1);
+    D21.col(1) = T2 * e.col(1);
+    D21.col(2) = T3 * e.col(1);
+
+    D31.col(0) = T1.transpose() * e.col(0);
+    D31.col(1) = T2.transpose() * e.col(0);
+    D31.col(2) = T3.transpose() * e.col(0);
 
     Eigen::Matrix<float, 3, 3> E21 = epi21_x * D21;
     Eigen::Matrix<float, 3, 3> E31 = epi31_x * D31;
 
     result_R_t_from_TFT result;
 
-    result.v1 = R_t_from_E(E21, p2d_1, p2d_2); // OK
-    result.v2 = R_t_from_E(E31, p2d_1, p2d_3); // OK
-    
-    Eigen::MatrixXf p3D = result.v1.p3d_h.colwise().hnormalized();
+    result.v2 = R_t_from_E(E21, p2d_1, p2d_2, p3d_1, use_prior); // OK
+    result.v3 = R_t_from_E(E31, p2d_1, p2d_3, p3d_1, use_prior); // OK
 
-    float scale = compute_scale(p2d_3, p3D, result.v2.P);
+    Eigen::MatrixXf p3d = result.v2.p3d_h.colwise().hnormalized();
 
-    result.v2.P.col(3) = scale * result.v2.P.col(3); // Self assign
+    result.v3.P.col(3) = compute_scale(p2d_3, p3d, result.v3.P) * result.v3.P.col(3); // Self assign // OK    
 
     return result;
 }
 
+// OK
+static
+Eigen::Matrix<float, 27, 1>
+transform_TFT
+(
+    Eigen::Ref<const Eigen::Matrix<float, 27, 1>> const& tft_i,
+    Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& M1,
+    Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& M2,
+    Eigen::Ref<const Eigen::Matrix<float, 3, 3>> const& M3,
+    bool inverse
+)
+{
+    Eigen::Matrix<float, 3, 3> t1_i = tft_i(Eigen::seqN( 0, 9)).reshaped(3, 3);
+    Eigen::Matrix<float, 3, 3> t2_i = tft_i(Eigen::seqN( 9, 9)).reshaped(3, 3);
+    Eigen::Matrix<float, 3, 3> t3_i = tft_i(Eigen::seqN(18, 9)).reshaped(3, 3);
 
+    Eigen::Matrix<float, 27, 1> t_o;
 
+    if (!inverse)
+    {
+        Eigen::Matrix<float, 3, 3> M1i = M1.inverse();
+        t_o(Eigen::seqN( 0, 9)) = (M2 * (M1i(0, 0) * t1_i + M1i(1, 0) * t2_i + M1i(2, 0) * t3_i) * M3.transpose()).reshaped(9, 1);
+        t_o(Eigen::seqN( 9, 9)) = (M2 * (M1i(0, 1) * t1_i + M1i(1, 1) * t2_i + M1i(2, 1) * t3_i) * M3.transpose()).reshaped(9, 1);
+        t_o(Eigen::seqN(18, 9)) = (M2 * (M1i(0, 2) * t1_i + M1i(1, 2) * t2_i + M1i(2, 2) * t3_i) * M3.transpose()).reshaped(9, 1);
+    }
+    else
+    {
+        Eigen::Matrix<float, 3, 3> M2i = M2.inverse();
+        Eigen::Matrix<float, 3, 3> M3i = M3.inverse();
+        t_o(Eigen::seqN( 0, 9)) = (M2i * (M1(0, 0) * t1_i + M1(1, 0) * t2_i + M1(2, 0) * t3_i) * M3i.transpose()).reshaped(9, 1);
+        t_o(Eigen::seqN( 9, 9)) = (M2i * (M1(0, 1) * t1_i + M1(1, 1) * t2_i + M1(2, 1) * t3_i) * M3i.transpose()).reshaped(9, 1);
+        t_o(Eigen::seqN(18, 9)) = (M2i * (M1(0, 2) * t1_i + M1(1, 2) * t2_i + M1(2, 2) * t3_i) * M3i.transpose()).reshaped(9, 1);
+    }
 
+    return t_o.normalized();
+}
 
+//-----------------------------------------------------------------------------
+// Solvers
+//-----------------------------------------------------------------------------
 
 // OK
-bool trifocal_R_t(float const* p2d_1, float const* p2d_2, float const* p2d_3, float const* sp2d, float const* sp3d, float* tft, float* r1, float* t1, float* r2, float* t2, float* s1, float* s2)
+bool
+trifocal_R_t_linear
+(
+    float const* p2d_1,
+    float const* p2d_2,
+    float const* p2d_3,
+    float const* p2d_s,
+    float const* p3d_s,
+    int N,
+    bool use_prior,
+    float* r1,
+    float* t1,
+    float* r2,
+    float* t2
+)
 {
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> A(27, 4 * 7);
+    Eigen::MatrixXf p2d_1_w(2, N);
+    Eigen::MatrixXf p2d_2_w(2, N);
+    Eigen::MatrixXf p2d_3_w(2, N);
+    Eigen::MatrixXf p2d_s_w(2, N);
+    Eigen::MatrixXf p3d_s_w(3, N);
 
-    Eigen::Matrix<float, 2, 7> p2d_1_d;
-    Eigen::Matrix<float, 2, 7> p2d_2_d;
-    Eigen::Matrix<float, 2, 7> p2d_3_d;
+    memcpy(p2d_1_w.data(), p2d_1, 2 * N * sizeof(float));
+    memcpy(p2d_2_w.data(), p2d_2, 2 * N * sizeof(float));
+    memcpy(p2d_3_w.data(), p2d_3, 2 * N * sizeof(float));
+    memcpy(p2d_s_w.data(), p2d_s, 2 * N * sizeof(float));
+    memcpy(p3d_s_w.data(), p3d_s, 3 * N * sizeof(float));
 
-    Eigen::Matrix<float, 2, 7> p2d_1_n;
-    Eigen::Matrix<float, 2, 7> p2d_2_n;
-    Eigen::Matrix<float, 2, 7> p2d_3_n;
-
-    Eigen::Matrix<float, 2, 7> sp2d_d;
-    Eigen::Matrix<float, 3, 7> sp3d_d;
-
-    Eigen::Matrix<float, 3, 3> M1;
-    Eigen::Matrix<float, 3, 3> M2;
-    Eigen::Matrix<float, 3, 3> M3;
-    Eigen::Matrix<float, 3, 4> P1;
-
-    memcpy(p2d_1_d.data(), p2d_1, 2 * 7 * sizeof(float));
-    memcpy(p2d_2_d.data(), p2d_2, 2 * 7 * sizeof(float));
-    memcpy(p2d_3_d.data(), p2d_3, 2 * 7 * sizeof(float));
-
-    memcpy(sp2d_d.data(), sp2d, 2 * 7 * sizeof(float));
-    memcpy(sp3d_d.data(), sp3d, 3 * 7 * sizeof(float));
-
-    //normalize_points(p2d_1_d, p2d_1_n, M1);
-    //normalize_points(p2d_2_d, p2d_2_n, M2);
-    //normalize_points(p2d_3_d, p2d_3_n, M3);
-
-    Eigen::Matrix<float, 6, 7> p2d;
-    p2d << p2d_1_d, p2d_2_d, p2d_3_d;
-
-
-    A = build_A(p2d); // OK
-    //build_A(p2d_1_n.data(), p2d_2_n.data(), p2d_3_n.data(), A); // OK
+    result_normalize_points rnp_1 = normalize_points(p2d_1_w);
+    result_normalize_points rnp_2 = normalize_points(p2d_2_w);
+    result_normalize_points rnp_3 = normalize_points(p2d_3_w);
+    
+    Eigen::MatrixXf A = build_A(rnp_1.p, rnp_2.p, rnp_3.p); // OK
     result_linear_TFT ltr = linear_TFT(A); // OK
 
-    //transform_TFT(TFT, M1, M2, M3, TFT, true);
+    ltr.TFT = transform_TFT(ltr.TFT, rnp_1.H, rnp_2.H, rnp_3.H, true);
 
-    result_R_t_from_TFT rpt = R_t_from_TFT(ltr.TFT, p2d_1_d, p2d_2_d, p2d_3_d); // OK
-    float world_scale = (sp2d && sp3d) ? compute_scale(sp2d_d, sp3d_d, rpt.v1.P) : 1.0f;
+    result_R_t_from_TFT rpt = R_t_from_TFT(ltr.TFT, p2d_1_w, p2d_2_w, p2d_3_w, p3d_s_w, use_prior); // OK
+    float world_scale = compute_scale(p2d_s_w, p3d_s_w, rpt.v2.P);
 
-    if (tft) { memcpy(tft, ltr.TFT.data(), 27 * sizeof(float)); }
-
-    Eigen::Matrix<float, 3, 3> R2 = rpt.v1.P(Eigen::all, Eigen::seqN(0, 3));
-    Eigen::Matrix<float, 3, 3> R3 = rpt.v2.P(Eigen::all, Eigen::seqN(0, 3));
+    Eigen::Matrix<float, 3, 3> R2 = rpt.v2.P(Eigen::all, Eigen::seqN(0, 3));
+    Eigen::Matrix<float, 3, 3> R3 = rpt.v3.P(Eigen::all, Eigen::seqN(0, 3));
 
     Eigen::AngleAxis<float> R01(R2);
     Eigen::AngleAxis<float> R02(R3);
@@ -564,31 +651,18 @@ bool trifocal_R_t(float const* p2d_1, float const* p2d_2, float const* p2d_3, fl
     Eigen::Matrix<float, 3, 1> r01 = R01.angle() * R01.axis();
     Eigen::Matrix<float, 3, 1> r02 = R02.angle() * R02.axis();
 
-    Eigen::Matrix<float, 3, 1> t01 = world_scale * rpt.v1.P.col(3);
-    Eigen::Matrix<float, 3, 1> t02 = world_scale * rpt.v2.P.col(3);
+    Eigen::Matrix<float, 3, 1> t01 = world_scale * rpt.v2.P.col(3);
+    Eigen::Matrix<float, 3, 1> t02 = world_scale * rpt.v3.P.col(3);
 
     memcpy(r1, r01.data(), 3 * sizeof(float));
     memcpy(r2, r02.data(), 3 * sizeof(float));
     memcpy(t1, t01.data(), 3 * sizeof(float));
     memcpy(t2, t02.data(), 3 * sizeof(float));
 
-    //if (s1) { *s1 = world_scale; }
-    //if (s2) { *s2 = local_scale; }
-
     return std::isfinite(r1[0] + r1[1] + r1[2] + t1[0] + t1[1] + t1[2] + r2[0] + r2[1] + r2[2] + t2[0] + t2[1] + t2[2]);
 }
 
-
-
-
-
-
-
-
-
-
-
-
+// OK
 struct
 gh_evaluation
 {
@@ -600,6 +674,7 @@ gh_evaluation
     Eigen::MatrixXf D;
 };
 
+// OK
 struct
 gh_result
 {
@@ -609,6 +684,7 @@ gh_result
     int iter;
 };
 
+// OK
 typedef 
 gh_evaluation
 (*gh_function)
@@ -619,6 +695,7 @@ gh_evaluation
     void* user
 );
 
+// OK
 gh_evaluation
 gh_ressl
 (
@@ -835,7 +912,7 @@ Gauss_Helmert
     int it_max = 400;
 
     // tol=1e-6;
-    float tol = 1e-6f;
+    float tol = 1e-9f;
 
     // xi=x0; 
     // yi=y0; 
@@ -902,6 +979,7 @@ Gauss_Helmert
         // if any(isnan(W(:))) || any(isinf(W(:)))
         if (!std::isfinite(W.sum()))
         {
+            std::cout << "STOP inf/nan W" << std::endl;
             // break;
             break;
         // end
@@ -948,6 +1026,7 @@ Gauss_Helmert
         // if any(isnan(M(:))) || any(isinf(M(:)))
         if (!std::isfinite(M.sum()))
         {
+            std::cout << "STOP inf/nan M" << std::endl;
             // break;
             break;
         // end
@@ -967,6 +1046,7 @@ Gauss_Helmert
         // if norm(dt)< tol && norm(dy) < tol && norm(xi-x-v) <tol
         if ((dt.norm() < tol) && (dy.norm() < tol) && ((xi - x - v).norm() < tol))
         {
+            std::cout << "STOP tol" << std::endl;
             // break;
             break;
         // end
@@ -974,8 +1054,10 @@ Gauss_Helmert
         
         // if sum(v.'*P*v) > objFunc*factor
         float of = (v.transpose() * P * v).sum();
+        std::cout << "cost: " << of << std::endl;
         if (of > objFunc * factor)
         {
+            std::cout << "STOP objFunc" << std::endl;
             // break;
             break;
         }
@@ -1002,15 +1084,17 @@ Gauss_Helmert
     return { xi, ti, yi, it };
 }
 
-void
-ResslTFTPoseEstimation
+// OK
+bool
+trifocal_R_t_Ressl
 (
     float const* p2d_1,
     float const* p2d_2,
     float const* p2d_3,
-    float const* sp2d,
-    float const* sp3d,
+    float const* p2d_s,
+    float const* p3d_s,
     int N,
+    bool use_prior,
     float* r1,
     float* t1,
     float* r2,
@@ -1020,24 +1104,22 @@ ResslTFTPoseEstimation
     Eigen::MatrixXf p2d_1_w(2, N);
     Eigen::MatrixXf p2d_2_w(2, N);
     Eigen::MatrixXf p2d_3_w(2, N);
+    Eigen::MatrixXf p2d_s_w(2, N);
+    Eigen::MatrixXf p3d_s_w(3, N);
 
-    ;
-    Eigen::Matrix<float, 3, 4> P1 = Eigen::Matrix<float, 3, 4>::Identity(); // TODO: constant
-    Eigen::MatrixXf sp2d_d(2, N);
-    Eigen::MatrixXf sp3d_d(3, N);
-    memcpy(sp2d_d.data(), sp2d, 2 * N * sizeof(float));
-    memcpy(sp3d_d.data(), sp3d, 3 * N * sizeof(float));
-
-    memcpy(p2d_1_w.data(), p2d_1, sizeof(float) * 2 * N);
-    memcpy(p2d_2_w.data(), p2d_2, sizeof(float) * 2 * N);
-    memcpy(p2d_3_w.data(), p2d_3, sizeof(float) * 2 * N);
+    memcpy(p2d_s_w.data(), p2d_s, 2 * N * sizeof(float));
+    memcpy(p3d_s_w.data(), p3d_s, 3 * N * sizeof(float));
+    memcpy(p2d_1_w.data(), p2d_1, 2 * N * sizeof(float));
+    memcpy(p2d_2_w.data(), p2d_2, 2 * N * sizeof(float));
+    memcpy(p2d_3_w.data(), p2d_3, 2 * N * sizeof(float));
 
     Eigen::MatrixXf p2d(6, N);
     p2d << p2d_1_w, p2d_2_w, p2d_3_w;
 
-    Eigen::MatrixXf At = build_A(p2d);
+    Eigen::MatrixXf At = build_A(p2d_1_w, p2d_2_w, p2d_3_w);
     result_linear_TFT ltr = linear_TFT(At);
 
+    Eigen::Matrix<float, 3, 4> P1 = Eigen::Matrix<float, 3, 4>::Identity(); // TODO: constant
 
     // e21=P2(:,4);
     Eigen::Matrix<float, 3, 1> e21 = ltr.P2.col(3);
@@ -1119,19 +1201,7 @@ ResslTFTPoseEstimation
     // p3_est=P3*points3D; p3_est=p3_est(1:2,:)./repmat(p3_est(3,:),2,1);
     Eigen::MatrixXf p3_est = (ltr.P3 * p3dh).colwise().hnormalized();
 
-    // OK
-    /*
-    std::cout << p2d_1_w << std::endl;
-    std::cout << p1_est << std::endl;
-    std::cout << p2d_2_w << std::endl;
-    std::cout << p2_est << std::endl;
-    std::cout << p2d_3_w << std::endl;
-    std::cout << p3_est << std::endl;
-    */
 
-    //std::cout << "S" << std::endl;
-    //std::cout << S << std::endl;
-    //std::cout << aux << std::endl;
 
     // N=size(x1,2);
     // p=[S(:);e21(Ind2);mn(:);e31];
@@ -1146,20 +1216,10 @@ ResslTFTPoseEstimation
     // x=reshape([x1(1:2,:);x2(1:2,:);x3(1:2,:)],6*N,1);
     Eigen::MatrixXf x(6 * N, 1);
     x = p2d.reshaped(6 * N, 1);
-    
-    //std::cout << "e21" << std::endl;
-    //std::cout << e21 << std::endl;
-    
-    
-    //
-    //x << p2d_1_w, p2d_2_w, p2d_3_w;
-    //x = x.reshaped(6 * N, 1);
-    
-    
+
     Eigen::MatrixXf x_est(6, N);
     x_est << p1_est, p2_est, p3_est;
     x_est = x_est.reshaped(6 * N, 1);
-
 
     Eigen::MatrixXf y(0, 1);
     Eigen::MatrixXf P = Eigen::MatrixXf::Identity(6 * N, 6 * N);
@@ -1169,50 +1229,27 @@ ResslTFTPoseEstimation
 
     S = ghr.t_opt(Eigen::seqN(0, 9), 0).reshaped(3, 3);
 
-    //std::cout << "S2" << std::endl;
-    //std::cout << S << std::endl;
-
     e21 = Eigen::Matrix<float, 3, 1>::Ones();
     e21(Ind2[0]) = ghr.t_opt(9, 0);
     e21(Ind2[1]) = ghr.t_opt(10, 0);
-
-    //std::cout << "e21" << std::endl;
-    //std::cout << e21 << std::endl;
-    //std::cout << "e31" << std::endl;
-    //std::cout << e31 << std::endl;
 
     mn_33 = Eigen::Matrix<float, 3, 3>::Zero();
     mn_33.col(Ind2[0]) = ghr.t_opt(Eigen::seqN(11, 3), 0);
     mn_33.col(Ind2[1]) = ghr.t_opt(Eigen::seqN(14, 3), 0);
     e31 = ghr.t_opt(Eigen::seqN(17, 3), 0);
 
-    //std::cout << "mn_33" << std::endl;
-    //std::cout << mn_33 << std::endl;
-    
-    //std::cout << "e31" << std::endl;
-    //std::cout << e31 << std::endl;
-    
-    
-    
-
     T1 = ((S.col(0) * e21.transpose()) + (e31 * mn_33.row(0))).transpose();
     T2 = ((S.col(1) * e21.transpose()) + (e31 * mn_33.row(1))).transpose();
     T3 = ((S.col(2) * e21.transpose()) + (e31 * mn_33.row(2))).transpose();
 
-    //std::cout << "TFT A" << std::endl;
-    //std::cout << ltr.TFT.normalized() << std::endl;
-
     ltr.TFT << T1.reshaped(9, 1), T2.reshaped(9, 1), T3.reshaped(9, 1);
 
-    //std::cout << "TFT B" << std::endl;
-    //std::cout << ltr.TFT.normalized() << std::endl;
+    result_R_t_from_TFT rpt = R_t_from_TFT(ltr.TFT, p2d_1_w, p2d_2_w, p2d_3_w, p3d_s_w, use_prior);
 
-    result_R_t_from_TFT rpt = R_t_from_TFT(ltr.TFT, p2d_1_w, p2d_2_w, p2d_3_w);
+    float world_scale = compute_scale(p2d_s_w, p3d_s_w, rpt.v2.P);
 
-    float world_scale = (sp2d && sp3d) ? compute_scale(sp2d_d, sp3d_d, rpt.v1.P) : 1.0f;
-
-    Eigen::Matrix<float, 3, 3> R2 = rpt.v1.P(Eigen::all, Eigen::seqN(0, 3));
-    Eigen::Matrix<float, 3, 3> R3 = rpt.v2.P(Eigen::all, Eigen::seqN(0, 3));
+    Eigen::Matrix<float, 3, 3> R2 = rpt.v2.P(Eigen::all, Eigen::seqN(0, 3));
+    Eigen::Matrix<float, 3, 3> R3 = rpt.v3.P(Eigen::all, Eigen::seqN(0, 3));
 
     Eigen::AngleAxis<float> R01(R2);
     Eigen::AngleAxis<float> R02(R3);
@@ -1220,225 +1257,13 @@ ResslTFTPoseEstimation
     Eigen::Matrix<float, 3, 1> r01 = R01.angle() * R01.axis();
     Eigen::Matrix<float, 3, 1> r02 = R02.angle() * R02.axis();
 
-    Eigen::Matrix<float, 3, 1> t01 = world_scale * rpt.v1.P.col(3);
-    Eigen::Matrix<float, 3, 1> t02 = world_scale * rpt.v2.P.col(3);
+    Eigen::Matrix<float, 3, 1> t01 = world_scale * rpt.v2.P.col(3);
+    Eigen::Matrix<float, 3, 1> t02 = world_scale * rpt.v3.P.col(3);
 
     memcpy(r1, r01.data(), 3 * sizeof(float));
     memcpy(r2, r02.data(), 3 * sizeof(float));
     memcpy(t1, t01.data(), 3 * sizeof(float));
     memcpy(t2, t02.data(), 3 * sizeof(float));
 
-
-
-    /*
-    
-
-    if (tft) { memcpy(tft, ltr.TFT.data(), 27 * sizeof(float)); }
-
-    
-
-    
-
-    
-
-    
-
-    if (s1) { *s1 = world_scale; }
-    if (s2) { *s2 = local_scale; }
-
     return std::isfinite(r1[0] + r1[1] + r1[2] + t1[0] + t1[1] + t1[2] + r2[0] + r2[1] + r2[2] + t2[0] + t2[1] + t2[2]);
-    */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }
-
-
-
-
-
-
-/*
-// OK
-static
-void
-triangulate
-(
-    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P0,
-    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P1,
-    Eigen::Ref<const Eigen::Matrix<float, 2, 7>> const& p2d_1,
-    Eigen::Ref<const Eigen::Matrix<float, 2, 7>> const& p2d_2,
-    Eigen::Ref<Eigen::Matrix<float, 4, 7>> p3h
-)
-{
-    Eigen::Matrix<float, 2, 3> L0
-    {
-        {0.0f, -1.0f, 0.0f},
-        {1.0f,  0.0f, 0.0f},
-    };
-    Eigen::Matrix<float, 2, 3> L1
-    {
-        {0.0f, -1.0f, 0.0f},
-        {1.0f,  0.0f, 0.0f},
-    };
-
-    Eigen::Matrix<float, 2 * 2, 4> ls_matrix;
-    Eigen::Matrix<float, 4, 1> XYZW;
-
-    for (int n = 0; n < 7; ++n)
-    {
-        L0(0, 2) =  p2d_1(1, n);
-        L0(1, 2) = -p2d_1(0, n);
-        L1(0, 2) =  p2d_2(1, n);
-        L1(1, 2) = -p2d_2(0, n);
-
-        ls_matrix(Eigen::seqN(0 * 2, 2), Eigen::all) = L0 * P0;
-        ls_matrix(Eigen::seqN(1 * 2, 2), Eigen::all) = L1 * P1;
-
-        XYZW = ls_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().col(3); // Previously BDC SVD, Full = Thin
-
-        p3h.col(n) = XYZW / XYZW(3);
-    }
-}
-
-static
-Eigen::MatrixXf
-triangulate3
-(
-    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P0,
-    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P1,
-    Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& P2,
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d_1,
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d_2,
-    Eigen::Ref<const Eigen::MatrixXf> const& p2d_3
-)
-{
-    int N = p2d_1.cols();
-
-    Eigen::Matrix<float, 2, 3> L0
-    {
-        {0.0f, -1.0f, 0.0f},
-        {1.0f,  0.0f, 0.0f},
-    };
-
-    Eigen::MatrixXf p3h(4, N);
-    Eigen::Matrix<float, 2 * 3, 4> ls_matrix;
-    Eigen::Matrix<float, 4, 1> XYZW;
-
-    for (int n = 0; n < N; ++n)
-    {
-        L0(0, 2) = p2d_1(1, n);
-        L0(1, 2) = -p2d_1(0, n);
-
-        ls_matrix(Eigen::seqN(0 * 2, 2), Eigen::all) = L0 * P0;
-
-        L0(0, 2) = p2d_2(1, n);
-        L0(1, 2) = -p2d_2(0, n);
-
-        ls_matrix(Eigen::seqN(1 * 2, 2), Eigen::all) = L0 * P1;
-
-        L0(0, 2) = p2d_3(1, n);
-        L0(1, 2) = -p2d_3(0, n);
-
-        ls_matrix(Eigen::seqN(2 * 2, 2), Eigen::all) = L0 * P2;
-
-        XYZW = ls_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().col(3); // Previously BDC SVD, Full = Thin
-
-        p3h.col(n) = XYZW / XYZW(3);
-    }
-
-    return p3h;
-}
-*/
-
-
-
-/*
-Eigen::Matrix<float, 3, 7> X3 = c2(Eigen::all, Eigen::seqN(0, 3)) * p3DH.colwise().hnormalized();
-Eigen::Matrix<float, 3, 1> p3;
-Eigen::Matrix<float, 3, 1> p3_X3;
-Eigen::Matrix<float, 3, 1> p3_t3;
-
-float num = 0;
-float den = 0;
-
-for (int i = 0; i < 7; ++i)
-{
-    p3(0) = p2d_3(0, i);
-    p3(1) = p2d_3(1, i);
-    p3(2) = 1.0f;
-
-    p3_X3 = p3.cross(X3.col(i));
-    p3_t3 = p3.cross(c2.col(3));
-
-    num -= p3_X3.dot(p3_t3);
-    den += p3_t3.dot(p3_t3);
-}
-
-float scale = num / den; // TODO: Mean or Median?
-*/
-//Eigen::Matrix<float, 3, 3> R;
-    //Eigen::Matrix<float, 3, 3> Ri = c1(Eigen::all, Eigen::seqN(0, 3)).transpose();
-    //Eigen::Matrix<float, 3, 1> ti = -(Ri * c1.col(3));
-    //Eigen::Matrix<float, 3, 1> P3;
-    //float scales[7];
-    //float ws;
-    //int valid = 0;
-        //P3(0) = p3d(0, i);
-        //P3(1) = p3d(1, i);
-        //P3(2) = p3d(2, i);
-
-        //X3 = R * P3;
-
-        //p3(0) = p2d(0, i);
-        //p3(1) = p2d(1, i);
-        //p3(2) = 1.0f;
-// OK
-/*
-static float compute_scale(float const* p2d, float const* p3d, Eigen::Ref<const Eigen::Matrix<float, 3, 4>> const& c1)
-{
-    Eigen::Matrix<float, 3, 3> Ri = c1(Eigen::all, Eigen::seqN(0, 3)).transpose();
-    Eigen::Matrix<float, 3, 1> ti = -(Ri * c1.col(3));
-    Eigen::Matrix<float, 3, 1> p3;
-    Eigen::Matrix<float, 3, 1> p2;
-    Eigen::Matrix<float, 3, 1> r2;
-
-    float scales[7];
-    float ws;
-    int valid = 0;
-
-    for (int i = 0; i < 7; ++i)
-    {
-        p3(0) = p3d[(3 * i) + 0];
-        p3(1) = p3d[(3 * i) + 1];
-        p3(2) = p3d[(3 * i) + 2];
-
-        p2(0) = p2d[(2 * i) + 0];
-        p2(1) = p2d[(2 * i) + 1];
-        p2(2) = 1.0f;
-
-        r2 = Ri * p2;
-        ws = std::sqrt(r2.cross(p3).squaredNorm() / r2.cross(ti).squaredNorm());
-
-        if (std::isfinite(ws)) { scales[valid++] = ws; }
-    }
-
-    if (valid <= 0) { return 0; }
-
-    std::sort(scales, scales + valid); // TODO: Mean or Median?
-    return scales[valid / 2];
-}
-*/
