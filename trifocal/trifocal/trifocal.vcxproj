@@ -48,7 +48,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -118,6 +118,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>C:\Users\jcds\Documents\GitHub\vcpkg\installed\x64-windows\include\eigen3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -128,13 +129,13 @@
     <ClCompile Include="loader.cpp" />
     <ClCompile Include="lock.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="trifocal.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="helpers_eigen.h" />
+    <ClInclude Include="helpers_geometry.h" />
     <ClInclude Include="loader.h" />
     <ClInclude Include="lock.h" />
     <ClInclude Include="trifocal.h" />
-    <ClInclude Include="trifocal_templates.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
